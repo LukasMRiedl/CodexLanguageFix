@@ -1,0 +1,34 @@
+<Window x:Class="CodexLanguageFix.UI.FirstRunWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Codex Language Fix"
+        Width="470" Height="270"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <TextBlock Text="Ein-Klick-Korrektur für Codex"
+               FontSize="22"
+               FontWeight="SemiBold" />
+    <StackPanel Grid.Row="1" Margin="0,18,0,18">
+      <TextBlock TextWrapping="Wrap"
+                 FontSize="14"
+                 Text="Wenn das Codex-Eingabefeld aktiv ist, erscheint darin ein kleiner ABC✓-Knopf. Erst nach deinem Klick wird der aktuelle Prompt verschlüsselt an die kostenlose LanguageTool-API übertragen und korrigiert." />
+      <TextBlock Margin="0,12,0,0"
+                 TextWrapping="Wrap"
+                 Foreground="#666666"
+                 Text="Die App verwendet weder ein Codex-Plugin noch die Zwischenablage. Prompttexte und API-Antworten werden nicht protokolliert." />
+    </StackPanel>
+    <Button Grid.Row="2"
+            Content="Verstanden"
+            Width="120" Height="34"
+            HorizontalAlignment="Right"
+            IsDefault="True"
+            Click="Accept_OnClick" />
+  </Grid>
+</Window>

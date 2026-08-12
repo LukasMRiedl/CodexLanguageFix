@@ -1,0 +1,241 @@
+<Window x:Class="CodexLanguageFix.UI.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Codex Language Fix Overlay"
+        AutomationProperties.Name="Codex Language Fix Overlay"
+        Width="36"
+        Height="36"
+        SizeToContent="Manual"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Focusable="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+  <Window.Resources>
+    <SolidColorBrush x:Key="OverlaySurfaceBrush" Color="#F02B2B2D" />
+    <SolidColorBrush x:Key="OverlayBorderBrush" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="ButtonBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#12FFFFFF" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#1EFFFFFF" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#E9E9EE" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#B8B9BE" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#78BFA9" />
+    <SolidColorBrush x:Key="SeparatorBrush" Color="#26FFFFFF" />
+
+    <Style TargetType="ToolTip">
+      <Setter Property="Background" Value="#F21F2022" />
+      <Setter Property="Foreground" Value="#F5F5F5" />
+      <Setter Property="BorderBrush" Value="#424348" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="9,6" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="HasDropShadow" Value="True" />
+      <Setter Property="Placement" Value="Top" />
+      <Setter Property="VerticalOffset" Value="-5" />
+    </Style>
+
+    <Style x:Key="ComposerIconButton" TargetType="Button">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource ButtonBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonHoverBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonPressedBrush}" />
+                <Setter TargetName="Chrome" Property="RenderTransformOrigin" Value="0.5,0.5" />
+                <Setter TargetName="Chrome" Property="RenderTransform">
+                  <Setter.Value>
+                    <ScaleTransform ScaleX="0.96" ScaleY="0.96" />
+                  </Setter.Value>
+                </Setter>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Chrome" Property="Opacity" Value="0.58" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="UndoButtonStyle" TargetType="Button">
+      <Setter Property="Height" Value="13" />
+      <Setter Property="Padding" Value="5,0" />
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="UndoChrome"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="3"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="UndoChrome" Property="Background" Value="{DynamicResource ButtonHoverBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="UndoChrome" Property="Background" Value="{DynamicResource ButtonPressedBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Grid VerticalAlignment="Center">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
+
+    <Border x:Name="StatusPill"
+            Grid.Column="0"
+            Visibility="Collapsed"
+            Opacity="0"
+            Height="15"
+            VerticalAlignment="Center"
+            Background="{DynamicResource OverlaySurfaceBrush}"
+            BorderBrush="{DynamicResource OverlayBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="0">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Grid Width="12" Height="12" Margin="3,0,0,0">
+          <Path x:Name="SuccessGlyph"
+                Visibility="Collapsed"
+                Data="M 1.5,6.5 L 4.5,10.5 L 10.5,2.5"
+                Stroke="{DynamicResource AccentBrush}"
+                StrokeThickness="1.35"
+                StrokeStartLineCap="Round"
+                StrokeEndLineCap="Round"
+                StrokeLineJoin="Round" />
+          <Ellipse x:Name="StatusDot"
+                   Width="4"
+                   Height="4"
+                   Fill="{DynamicResource SecondaryTextBrush}"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
+        </Grid>
+        <TextBlock x:Name="StatusText"
+                   Margin="2,0,5,0"
+                   VerticalAlignment="Center"
+                   FontFamily="Segoe UI Variable Text"
+                   FontSize="10"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   MaxWidth="184"
+                   TextTrimming="CharacterEllipsis" />
+        <Border x:Name="UndoSeparator"
+                Visibility="Collapsed"
+                Width="1"
+                Height="9"
+                Background="{DynamicResource SeparatorBrush}"
+                Margin="0,0,1,0" />
+        <Button x:Name="UndoButton"
+                Visibility="Collapsed"
+                Style="{StaticResource UndoButtonStyle}"
+                ToolTip="Letzte Korrektur zurücknehmen"
+                AutomationProperties.Name="Rückgängig"
+                Click="UndoButton_OnClick">
+          <StackPanel Orientation="Horizontal">
+            <Grid Width="12" Height="12" Margin="0,0,3,0" VerticalAlignment="Center">
+              <Path Data="M 4.75,2.5 L 1.5,5.5 L 4.75,8.5 M 1.75,5.5 H 7.25 C 9.25,5.5 10.5,6.75 10.5,8.5 C 10.5,9.75 9.25,10 7.75,10 H 5.75"
+                    Stroke="{DynamicResource PrimaryTextBrush}"
+                    StrokeThickness="1.35"
+                    StrokeStartLineCap="Round"
+                    StrokeEndLineCap="Round"
+                    StrokeLineJoin="Round" />
+            </Grid>
+            <TextBlock Text="Rückgängig" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+      <Border.RenderTransform>
+        <TranslateTransform x:Name="StatusTranslate" X="4" Y="-2" />
+      </Border.RenderTransform>
+    </Border>
+
+    <Border x:Name="StatusGap"
+            Grid.Column="1"
+            Width="4"
+            Visibility="Collapsed" />
+
+    <Button x:Name="CorrectButton"
+            Grid.Column="2"
+            VerticalAlignment="Center"
+            Style="{StaticResource ComposerIconButton}"
+            ToolTip="Rechtschreibung und Grammatik korrigieren"
+            Click="CorrectButton_OnClick"
+            AutomationProperties.Name="Prompt mit LanguageTool korrigieren">
+      <Grid Width="24" Height="24">
+        <Grid x:Name="GrammarGlyph">
+          <Grid.RenderTransform>
+            <TranslateTransform Y="-2.5" />
+          </Grid.RenderTransform>
+          <TextBlock Text="Aa"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Margin="0,-3,0,0"
+                     FontFamily="Segoe UI Variable Text"
+                     FontSize="11"
+                     FontWeight="SemiBold"
+                     Foreground="{DynamicResource PrimaryTextBrush}" />
+          <Path Data="M 5,19 C 8,16.8 10,21.2 13,19 C 16,16.8 18,21.2 21,19"
+                Stroke="{DynamicResource SecondaryTextBrush}"
+                StrokeThickness="1.25"
+                StrokeStartLineCap="Round"
+                StrokeEndLineCap="Round" />
+        </Grid>
+        <Grid x:Name="BusyGlyph" Visibility="Collapsed">
+          <Ellipse Width="15"
+                   Height="15"
+                   Stroke="{DynamicResource OverlayBorderBrush}"
+                   StrokeThickness="1.5" />
+          <Path Data="M 14,5 A 7,7 0 0 1 19,12"
+                Stroke="{DynamicResource PrimaryTextBrush}"
+                StrokeThickness="1.7"
+                StrokeStartLineCap="Round">
+            <Path.RenderTransform>
+              <RotateTransform x:Name="BusyRotation" CenterX="12" CenterY="12" />
+            </Path.RenderTransform>
+          </Path>
+        </Grid>
+      </Grid>
+    </Button>
+  </Grid>
+</Window>

@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+.vscode/
+TestResults/
+artifacts/
+dist/
+publish/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+*.log
+*.jsonl
+.DS_Store
+Thumbs.db

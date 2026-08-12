@@ -1,0 +1,8 @@
+<Application x:Class="CodexLanguageFix.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+  <Application.Resources>
+    <SolidColorBrush x:Key="AccentBrush" Color="#10A37F" />
+  </Application.Resources>
+</Application>
