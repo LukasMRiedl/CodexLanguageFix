@@ -47,7 +47,7 @@ public sealed class LanguageToolClientTests
             called = true;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         });
-        using var client = new LanguageToolClient(new HttpClient(handler));
+        using var client = new LanguageToolClient(new HttpClient(handler), localizer: new AppLocalizer("de"));
         var prompt = new CorrectionEngine().Annotate(new string('a', 20_001));
 
         await Assert.ThrowsAsync<LanguageFixException>(() => client.CheckAsync(prompt, CancellationToken.None));
@@ -62,7 +62,7 @@ public sealed class LanguageToolClientTests
         {
             Content = new StringContent("not-json")
         }));
-        using var client = new LanguageToolClient(new HttpClient(handler));
+        using var client = new LanguageToolClient(new HttpClient(handler), localizer: new AppLocalizer("de"));
 
         var exception = await Assert.ThrowsAsync<LanguageFixException>(() =>
             client.CheckAsync(new CorrectionEngine().Annotate("Test"), CancellationToken.None));

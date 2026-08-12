@@ -169,8 +169,6 @@
         <Button x:Name="UndoButton"
                 Visibility="Collapsed"
                 Style="{StaticResource UndoButtonStyle}"
-                ToolTip="Letzte Korrektur zurücknehmen"
-                AutomationProperties.Name="Rückgängig"
                 Click="UndoButton_OnClick">
           <StackPanel Orientation="Horizontal">
             <Grid Width="12" Height="12" Margin="0,0,3,0" VerticalAlignment="Center">
@@ -181,7 +179,7 @@
                     StrokeEndLineCap="Round"
                     StrokeLineJoin="Round" />
             </Grid>
-            <TextBlock Text="Rückgängig" VerticalAlignment="Center" />
+            <TextBlock x:Name="UndoText" VerticalAlignment="Center" />
           </StackPanel>
         </Button>
       </StackPanel>
@@ -199,9 +197,8 @@
             Grid.Column="2"
             VerticalAlignment="Center"
             Style="{StaticResource ComposerIconButton}"
-            ToolTip="Rechtschreibung und Grammatik korrigieren"
             Click="CorrectButton_OnClick"
-            AutomationProperties.Name="Prompt mit LanguageTool korrigieren">
+            >
       <Grid Width="24" Height="24">
         <Grid x:Name="GrammarGlyph">
           <Grid.RenderTransform>

@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using CodexLanguageFix.Core;
 
 namespace CodexLanguageFix.Infrastructure;
 
@@ -6,6 +7,12 @@ public sealed class AutostartService
 {
     private const string RegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "CodexLanguageFix";
+    private readonly AppLocalizer _localizer;
+
+    public AutostartService(AppLocalizer? localizer = null)
+    {
+        _localizer = localizer ?? new AppLocalizer();
+    }
 
     public bool IsEnabled
     {
@@ -21,7 +28,7 @@ public sealed class AutostartService
         using var key = Registry.CurrentUser.CreateSubKey(RegistryPath, true);
         if (enabled)
         {
-            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Der Anwendungspfad konnte nicht bestimmt werden.");
+            var executable = Environment.ProcessPath ?? throw new InvalidOperationException(_localizer.Get(AppText.ApplicationPathUnavailable));
             key.SetValue(ValueName, $"\"{executable}\" --autostart", RegistryValueKind.String);
         }
         else

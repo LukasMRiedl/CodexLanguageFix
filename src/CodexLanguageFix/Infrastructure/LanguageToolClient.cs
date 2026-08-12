@@ -16,16 +16,21 @@ public sealed class LanguageToolClient : ILanguageToolClient, IDisposable
     private readonly HttpClient _httpClient;
     private readonly SlidingWindowRateLimiter _rateLimiter;
     private readonly bool _ownsClient;
+    private readonly AppLocalizer _localizer;
 
-    public LanguageToolClient(HttpClient? httpClient = null, SlidingWindowRateLimiter? rateLimiter = null)
+    public LanguageToolClient(
+        HttpClient? httpClient = null,
+        SlidingWindowRateLimiter? rateLimiter = null,
+        AppLocalizer? localizer = null)
     {
+        _localizer = localizer ?? new AppLocalizer();
         _ownsClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(10)
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodexLanguageFix/1.0 (+https://languagetool.org)");
-        _rateLimiter = rateLimiter ?? new SlidingWindowRateLimiter();
+        _rateLimiter = rateLimiter ?? new SlidingWindowRateLimiter(localizer: _localizer);
     }
 
     public async Task<LanguageToolCheckResult> CheckAsync(AnnotatedPrompt prompt, CancellationToken cancellationToken)
@@ -38,7 +43,7 @@ public sealed class LanguageToolClient : ILanguageToolClient, IDisposable
 
         if (prompt.Original.Length > MaximumPromptLength)
         {
-            throw new LanguageFixException($"Der Prompt enthält {prompt.Original.Length:N0} Zeichen. Die kostenlose API erlaubt höchstens {MaximumPromptLength:N0} Zeichen pro Prüfung.");
+            throw new LanguageFixException(_localizer.Get(AppText.PromptTooLong, prompt.Original.Length, MaximumPromptLength));
         }
 
         _rateLimiter.Reserve(prompt.Original.Length);
@@ -60,11 +65,11 @@ public sealed class LanguageToolClient : ILanguageToolClient, IDisposable
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new LanguageFixException("LanguageTool hat nicht innerhalb von zehn Sekunden geantwortet.");
+            throw new LanguageFixException(_localizer.Get(AppText.LanguageToolTimeout));
         }
         catch (HttpRequestException exception)
         {
-            throw new LanguageFixException("LanguageTool ist derzeit nicht erreichbar. Der Prompt wurde nicht verändert.", exception);
+            throw new LanguageFixException(_localizer.Get(AppText.LanguageToolNetworkFailure), exception);
         }
 
         using (response)
@@ -73,12 +78,12 @@ public sealed class LanguageToolClient : ILanguageToolClient, IDisposable
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 var retryAfter = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromMinutes(1);
-                throw new RateLimitException("LanguageTool hat das Anfragelimit erreicht. Bitte später erneut versuchen.", retryAfter);
+                throw new RateLimitException(_localizer.Get(AppText.LanguageToolRateLimit), retryAfter);
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new LanguageFixException($"LanguageTool hat mit HTTP {(int)response.StatusCode} geantwortet. Der Prompt wurde nicht verändert.");
+                throw new LanguageFixException(_localizer.Get(AppText.LanguageToolHttpFailure, (int)response.StatusCode));
             }
 
             try
@@ -99,7 +104,7 @@ public sealed class LanguageToolClient : ILanguageToolClient, IDisposable
             }
             catch (JsonException exception)
             {
-                throw new LanguageFixException("LanguageTool hat eine ungültige Antwort geliefert. Der Prompt wurde nicht verändert.", exception);
+                throw new LanguageFixException(_localizer.Get(AppText.LanguageToolInvalidResponse), exception);
             }
         }
     }

@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CodexLanguageFix.Contracts;
+using CodexLanguageFix.Core;
 
 namespace CodexLanguageFix.UI;
 
@@ -22,14 +23,31 @@ public partial class OverlayWindow : Window
     private string? _lastStatusMessage;
     private bool _lastStatusCanUndo;
     private bool _statusVisible;
+    private readonly AppLocalizer _localizer;
 
     internal int StatusStateChangeCount { get; private set; }
 
-    public OverlayWindow()
+    public OverlayWindow(AppLocalizer? localizer = null)
     {
+        _localizer = localizer ?? new AppLocalizer();
         InitializeComponent();
+        ApplyLanguage();
+        _localizer.LanguageChanged += Localizer_OnLanguageChanged;
         StartBusyAnimation();
         SourceInitialized += (_, _) => ApplyNoActivateStyle();
+    }
+
+    private void Localizer_OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
+
+    private void ApplyLanguage()
+    {
+        Language = System.Windows.Markup.XmlLanguage.GetLanguage(_localizer.Culture.IetfLanguageTag);
+        UndoText.Text = _localizer.Get(AppText.Undo);
+        UndoButton.ToolTip = _localizer.Get(AppText.UndoTooltip);
+        System.Windows.Automation.AutomationProperties.SetName(UndoButton, _localizer.Get(AppText.Undo));
+        CorrectButton.ToolTip = _localizer.Get(AppText.CorrectTooltip);
+        System.Windows.Automation.AutomationProperties.SetName(CorrectButton, _localizer.Get(AppText.CorrectAutomationName));
+        RepositionAfterLayout();
     }
 
     public event EventHandler? CorrectRequested;
@@ -315,6 +333,12 @@ public partial class OverlayWindow : Window
     {
         base.OnActivated(e);
         // Das Fenster darf den Eingabefokus von Codex nicht übernehmen.
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
+        base.OnClosed(e);
     }
 
     private void CorrectButton_OnClick(object sender, RoutedEventArgs e) => CorrectRequested?.Invoke(this, EventArgs.Empty);

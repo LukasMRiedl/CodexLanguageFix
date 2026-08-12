@@ -10,18 +10,30 @@ public sealed class TrayController : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _autostartItem;
+    private readonly ToolStripMenuItem _connectionItem;
+    private readonly ToolStripMenuItem _languageItem;
+    private readonly ToolStripMenuItem _automaticLanguageItem;
+    private readonly ToolStripMenuItem _germanLanguageItem;
+    private readonly ToolStripMenuItem _englishLanguageItem;
+    private readonly ToolStripMenuItem _exitItem;
     private readonly AppSettings _settings;
     private readonly SettingsService _settingsService;
     private readonly AutostartService _autostartService;
+    private readonly AppLocalizer _localizer;
     private bool _suppressAutostartEvent;
 
-    public TrayController(AppSettings settings, SettingsService settingsService, AutostartService autostartService)
+    public TrayController(
+        AppSettings settings,
+        SettingsService settingsService,
+        AutostartService autostartService,
+        AppLocalizer localizer)
     {
         _settings = settings;
         _settingsService = settingsService;
         _autostartService = autostartService;
+        _localizer = localizer;
 
-        _enabledItem = new ToolStripMenuItem("Aktiviert")
+        _enabledItem = new ToolStripMenuItem
         {
             Checked = settings.Enabled,
             CheckOnClick = true
@@ -33,7 +45,7 @@ public sealed class TrayController : IDisposable
             EnabledChanged?.Invoke(this, EventArgs.Empty);
         };
 
-        _autostartItem = new ToolStripMenuItem("Mit Windows starten")
+        _autostartItem = new ToolStripMenuItem
         {
             Checked = settings.StartWithWindows,
             CheckOnClick = true
@@ -56,23 +68,29 @@ public sealed class TrayController : IDisposable
                 _suppressAutostartEvent = true;
                 _autostartItem.Checked = !_autostartItem.Checked;
                 _suppressAutostartEvent = false;
-                ShowMessage("Autostart konnte nicht geändert werden", exception.Message, ToolTipIcon.Error);
+                ShowMessage(_localizer.Get(AppText.AutostartChangeFailed), exception.Message, ToolTipIcon.Error);
             }
         };
 
-        var connectionItem = new ToolStripMenuItem("LanguageTool-Verbindung testen");
-        connectionItem.Click += (_, _) => ConnectionTestRequested?.Invoke(this, EventArgs.Empty);
-        var exitItem = new ToolStripMenuItem("Beenden");
-        exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
+        _connectionItem = new ToolStripMenuItem();
+        _connectionItem.Click += (_, _) => ConnectionTestRequested?.Invoke(this, EventArgs.Empty);
+        _languageItem = new ToolStripMenuItem();
+        _automaticLanguageItem = CreateLanguageItem(AppLocalizer.Automatic);
+        _germanLanguageItem = CreateLanguageItem(AppLocalizer.German);
+        _englishLanguageItem = CreateLanguageItem(AppLocalizer.English);
+        _languageItem.DropDownItems.AddRange([_automaticLanguageItem, _germanLanguageItem, _englishLanguageItem]);
+        _exitItem = new ToolStripMenuItem();
+        _exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
         var menu = new ContextMenuStrip();
         menu.Items.AddRange([
             _enabledItem,
             _autostartItem,
             new ToolStripSeparator(),
-            connectionItem,
+            _connectionItem,
+            _languageItem,
             new ToolStripSeparator(),
-            exitItem
+            _exitItem
         ]);
 
         _notifyIcon = new NotifyIcon
@@ -82,6 +100,8 @@ public sealed class TrayController : IDisposable
             ContextMenuStrip = menu,
             Visible = true
         };
+        _localizer.LanguageChanged += Localizer_OnLanguageChanged;
+        ApplyLanguage();
     }
 
     public event EventHandler? EnabledChanged;
@@ -89,6 +109,41 @@ public sealed class TrayController : IDisposable
     public event EventHandler? ExitRequested;
 
     public bool Enabled => _settings.Enabled;
+
+    private ToolStripMenuItem CreateLanguageItem(string language)
+    {
+        var item = new ToolStripMenuItem { Tag = language };
+        item.Click += (_, _) =>
+        {
+            _settings.Language = language;
+            _localizer.SetLanguage(language);
+            Save();
+            UpdateLanguageChecks();
+        };
+        return item;
+    }
+
+    private void Localizer_OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
+
+    private void ApplyLanguage()
+    {
+        _enabledItem.Text = _localizer.Get(AppText.Enabled);
+        _autostartItem.Text = _localizer.Get(AppText.StartWithWindows);
+        _connectionItem.Text = _localizer.Get(AppText.TestConnection);
+        _languageItem.Text = _localizer.Get(AppText.Language);
+        _automaticLanguageItem.Text = _localizer.Get(AppText.LanguageAutomatic);
+        _germanLanguageItem.Text = _localizer.Get(AppText.LanguageGerman);
+        _englishLanguageItem.Text = _localizer.Get(AppText.LanguageEnglish);
+        _exitItem.Text = _localizer.Get(AppText.Exit);
+        UpdateLanguageChecks();
+    }
+
+    private void UpdateLanguageChecks()
+    {
+        _automaticLanguageItem.Checked = _localizer.LanguageMode == AppLocalizer.Automatic;
+        _germanLanguageItem.Checked = _localizer.LanguageMode == AppLocalizer.German;
+        _englishLanguageItem.Checked = _localizer.LanguageMode == AppLocalizer.English;
+    }
 
     public void ShowMessage(string title, string text, ToolTipIcon icon = ToolTipIcon.Info)
     {
@@ -99,6 +154,7 @@ public sealed class TrayController : IDisposable
 
     public void Dispose()
     {
+        _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
     }

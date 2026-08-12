@@ -6,11 +6,13 @@ namespace CodexLanguageFix.Tests;
 public sealed class OverlayWindowTests
 {
     [Theory]
-    [InlineData(1, "1 Änderung")]
-    [InlineData(2, "2 Änderungen")]
-    public void ChangeCount_UsesCorrectGermanGrammar(int count, string expected)
+    [InlineData("de", 1, "1 Änderung")]
+    [InlineData("de", 2, "2 Änderungen")]
+    [InlineData("en", 1, "1 change")]
+    [InlineData("en", 2, "2 changes")]
+    public void ChangeCount_UsesSelectedLanguage(string language, int count, string expected)
     {
-        Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count));
+        Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count, new AppLocalizer(language)));
     }
 
     [Theory]
@@ -34,7 +36,7 @@ public sealed class OverlayWindowTests
         {
             try
             {
-                var overlay = new OverlayWindow();
+                var overlay = new OverlayWindow(new AppLocalizer("de"));
                 overlay.ShowStatus(null);
                 Assert.Equal(36, overlay.Width);
                 Assert.Equal(36, overlay.Height);

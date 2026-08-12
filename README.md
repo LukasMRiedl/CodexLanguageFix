@@ -11,6 +11,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 - A subtle `Aa` button dynamically appears inside the active prompt bar.
 - One click checks spelling, grammar, punctuation, and style.
 - German and English are detected automatically, with `de-DE` and `en-US` as the preferred variants.
+- The entire interface is available in English and German. It follows the Windows display language by default and can be switched at any time from the system tray menu.
 - Markdown code blocks, inline code, URLs, email addresses, file paths, command-line options, and common code identifiers remain unchanged.
 - The clipboard is never read or modified.
 - Prompt text is transmitted only after an explicit click.

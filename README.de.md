@@ -11,6 +11,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 - Ein unaufdringlicher `Aa`-Knopf erscheint dynamisch in der aktuellen Eingabeleiste.
 - Ein Klick prüft Rechtschreibung, Grammatik, Zeichensetzung und Stil.
 - Deutsch und Englisch werden automatisch erkannt; bevorzugt werden `de-DE` und `en-US`.
+- Die gesamte Oberfläche ist auf Deutsch und Englisch verfügbar. Standardmäßig folgt sie der Windows-Anzeigesprache und lässt sich jederzeit über das Menü im Infobereich umschalten.
 - Markdown-Codeblöcke, Inline-Code, URLs, E-Mail-Adressen, Pfade, Befehlsoptionen und typische Codebezeichner bleiben unverändert.
 - Die Zwischenablage wird weder gelesen noch verändert.
 - Der Prompt wird nur nach einem ausdrücklichen Klick übertragen.

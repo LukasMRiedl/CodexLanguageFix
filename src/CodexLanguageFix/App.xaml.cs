@@ -26,12 +26,13 @@ public partial class App : System.Windows.Application
 
         var settingsService = new SettingsService();
         var settings = settingsService.Load();
-        var autostartService = new AutostartService();
+        var localizer = new AppLocalizer(settings.Language);
+        var autostartService = new AutostartService(localizer);
         var logger = new DiagnosticLogger(settingsService.ApplicationDirectory);
 
         if (!settings.FirstRunNoticeShown)
         {
-            var notice = new FirstRunWindow();
+            var notice = new FirstRunWindow(localizer);
             if (notice.ShowDialog() != true)
             {
                 Shutdown();
@@ -55,9 +56,9 @@ public partial class App : System.Windows.Application
             }
         }
 
-        _languageToolClient = new LanguageToolClient();
-        _tray = new TrayController(settings, settingsService, autostartService);
-        var overlay = new OverlayWindow();
+        _languageToolClient = new LanguageToolClient(localizer: localizer);
+        _tray = new TrayController(settings, settingsService, autostartService, localizer);
+        var overlay = new OverlayWindow(localizer);
         _coordinator = new CorrectionCoordinator(
             new CodexComposerAccessor(),
             _languageToolClient,
@@ -65,7 +66,8 @@ public partial class App : System.Windows.Application
             overlay,
             _tray,
             logger,
-            Dispatcher);
+            Dispatcher,
+            localizer);
         _tray.ExitRequested += (_, _) => Shutdown();
         _coordinator.Start();
         logger.Write("application_started");

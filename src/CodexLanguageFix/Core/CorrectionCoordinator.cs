@@ -16,6 +16,7 @@ public sealed class CorrectionCoordinator : IDisposable
     private readonly DiagnosticLogger _logger;
     private readonly CodexFocusWatcher _focusWatcher;
     private readonly DispatcherTimer _fallbackTimer;
+    private readonly AppLocalizer _localizer;
     private CancellationTokenSource? _requestCancellation;
     private ComposerSnapshot? _visibleSnapshot;
     private UndoState? _undo;
@@ -28,7 +29,8 @@ public sealed class CorrectionCoordinator : IDisposable
         OverlayWindow overlay,
         TrayController tray,
         DiagnosticLogger logger,
-        Dispatcher dispatcher)
+        Dispatcher dispatcher,
+        AppLocalizer localizer)
     {
         _composerAccessor = composerAccessor;
         _languageToolClient = languageToolClient;
@@ -36,6 +38,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _overlay = overlay;
         _tray = tray;
         _logger = logger;
+        _localizer = localizer;
         _focusWatcher = new CodexFocusWatcher(dispatcher);
         _focusWatcher.Changed += (_, _) => RefreshOverlay();
         _fallbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(750), DispatcherPriority.Background, (_, _) => RefreshOverlay(), dispatcher);
@@ -43,6 +46,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _overlay.UndoRequested += (_, _) => Undo();
         _tray.EnabledChanged += (_, _) => RefreshOverlay();
         _tray.ConnectionTestRequested += async (_, _) => await TestConnectionAsync();
+        _localizer.LanguageChanged += Localizer_OnLanguageChanged;
     }
 
     public void Start()
@@ -94,7 +98,7 @@ public sealed class CorrectionCoordinator : IDisposable
             _undo = null;
         }
 
-        _overlay.ShowStatus(canUndo ? FormatChangeCount(_undo!.ChangeCount) : null, canUndo);
+        _overlay.ShowStatus(canUndo ? FormatChangeCount(_undo!.ChangeCount, _localizer) : null, canUndo);
         _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host);
     }
 
@@ -108,13 +112,13 @@ public sealed class CorrectionCoordinator : IDisposable
         var snapshot = _composerAccessor.TryCaptureFocusedComposer() ?? _visibleSnapshot;
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
-            ShowTransient("Kein Codex-Prompt erkannt");
+            ShowTransient(_localizer.Get(AppText.NoPromptDetected));
             return;
         }
 
         _busy = true;
         _overlay.SetBusy(true);
-        _overlay.ShowStatus("Wird geprüft …");
+        _overlay.ShowStatus(_localizer.Get(AppText.Checking));
         _requestCancellation = new CancellationTokenSource();
         try
         {
@@ -125,7 +129,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
             if (!outcome.Changed || string.Equals(outcome.CorrectedText, snapshot.Text, StringComparison.Ordinal))
             {
-                ShowTransient("Keine Änderungen gefunden");
+                ShowTransient(_localizer.Get(AppText.NoChangesFound));
                 return;
             }
 
@@ -133,13 +137,13 @@ public sealed class CorrectionCoordinator : IDisposable
             if (current is null)
             {
                 _logger.Write("composer_unavailable_before_write", snapshot.Text.Length);
-                throw new LanguageFixException("Das Codex-Eingabefeld ist nicht mehr verfügbar. Es wurde nichts überschrieben.");
+                throw new LanguageFixException(_localizer.Get(AppText.ComposerUnavailable));
             }
 
             if (!string.Equals(current.Text, snapshot.Text, StringComparison.Ordinal))
             {
                 _logger.Write("composer_changed_before_write", snapshot.Text.Length);
-                throw new LanguageFixException("Der Prompt wurde während der Prüfung verändert. Es wurde nichts überschrieben.");
+                throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
             }
 
             if (!_composerAccessor.TryReplace(current, snapshot.Text, outcome.CorrectedText))
@@ -148,30 +152,33 @@ public sealed class CorrectionCoordinator : IDisposable
                     ? accessor.LastWriteStatus
                     : "unknown";
                 _logger.Write($"composer_write_rejected_{detail}", snapshot.Text.Length);
-                throw new LanguageFixException("Codex hat das direkte Zurückschreiben abgelehnt. Der Prompt wurde nicht verändert.");
+                throw new LanguageFixException(_localizer.Get(AppText.WriteRejected));
             }
 
             _undo = new UndoState(current, snapshot.Text, outcome.CorrectedText, outcome.Corrections.Count);
-            _overlay.ShowStatus(FormatChangeCount(outcome.Corrections.Count), true);
-            var suggestionLabel = outcome.Corrections.Count == 1 ? "Vorschlag wurde" : "Vorschläge wurden";
-            _tray.ShowMessage("Prompt korrigiert", $"{outcome.Corrections.Count} LanguageTool-{suggestionLabel} übernommen.");
+            _overlay.ShowStatus(FormatChangeCount(outcome.Corrections.Count, _localizer), true);
+            _tray.ShowMessage(
+                _localizer.Get(AppText.PromptCorrected),
+                outcome.Corrections.Count == 1
+                    ? _localizer.Get(AppText.SuggestionAppliedOne)
+                    : _localizer.Get(AppText.SuggestionsAppliedMany, outcome.Corrections.Count));
         }
         catch (OperationCanceledException)
         {
-            ShowTransient("Prüfung abgebrochen");
+            ShowTransient(_localizer.Get(AppText.CheckCancelled));
         }
         catch (LanguageFixException exception)
         {
             _logger.Write("check_failed", snapshot.Text.Length);
             ShowTransient(exception.Message);
-            _tray.ShowMessage("Korrektur nicht möglich", exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
+            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
         }
         catch (Exception exception)
         {
             _logger.Write("unexpected_check_failure", snapshot.Text.Length);
-            const string message = "Die Korrektur ist unerwartet fehlgeschlagen. Der Prompt wurde nicht verändert.";
+            var message = _localizer.Get(AppText.UnexpectedCorrectionFailure);
             ShowTransient(message);
-            _tray.ShowMessage("Korrektur nicht möglich", message, System.Windows.Forms.ToolTipIcon.Error);
+            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), message, System.Windows.Forms.ToolTipIcon.Error);
             System.Diagnostics.Debug.WriteLine(exception);
         }
         finally
@@ -196,18 +203,18 @@ public sealed class CorrectionCoordinator : IDisposable
         if (current is null || !MatchesProviderText(current.Text, _undo.Corrected))
         {
             _undo = null;
-            ShowTransient("Rückgängig nicht mehr möglich");
+            ShowTransient(_localizer.Get(AppText.UndoUnavailable));
             return;
         }
 
         if (_composerAccessor.TryReplace(current, current.Text, _undo.Original))
         {
             _undo = null;
-            ShowTransient("Korrektur zurückgenommen");
+            ShowTransient(_localizer.Get(AppText.UndoCompleted));
         }
         else
         {
-            ShowTransient("Rückgängig fehlgeschlagen");
+            ShowTransient(_localizer.Get(AppText.UndoFailed));
         }
     }
 
@@ -217,15 +224,15 @@ public sealed class CorrectionCoordinator : IDisposable
         {
             var prompt = _correctionEngine.Annotate("This is a connection test.");
             var result = await _languageToolClient.CheckAsync(prompt, CancellationToken.None);
-            _tray.ShowMessage("LanguageTool erreichbar", $"Antwort in {result.Elapsed.TotalMilliseconds:N0} ms.");
+            _tray.ShowMessage(_localizer.Get(AppText.LanguageToolAvailable), _localizer.Get(AppText.ResponseTime, result.Elapsed.TotalMilliseconds));
         }
         catch (LanguageFixException exception)
         {
-            _tray.ShowMessage("LanguageTool nicht erreichbar", exception.Message, System.Windows.Forms.ToolTipIcon.Error);
+            _tray.ShowMessage(_localizer.Get(AppText.LanguageToolUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Error);
         }
         catch (Exception)
         {
-            _tray.ShowMessage("LanguageTool nicht erreichbar", "Der Verbindungstest ist unerwartet fehlgeschlagen.", System.Windows.Forms.ToolTipIcon.Error);
+            _tray.ShowMessage(_localizer.Get(AppText.LanguageToolUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure), System.Windows.Forms.ToolTipIcon.Error);
         }
     }
 
@@ -248,8 +255,18 @@ public sealed class CorrectionCoordinator : IDisposable
             && (observed[^1] == '\r' || observed[^1] == '\n')
             && observed.AsSpan(0, expected.Length).SequenceEqual(expected.AsSpan()));
 
-    internal static string FormatChangeCount(int count) =>
-        count == 1 ? "1 Änderung" : $"{count} Änderungen";
+    private void Localizer_OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (_undo is not null)
+        {
+            _overlay.ShowStatus(FormatChangeCount(_undo.ChangeCount, _localizer), true);
+        }
+    }
+
+    internal static string FormatChangeCount(int count, AppLocalizer localizer) =>
+        count == 1
+            ? localizer.Get(AppText.ChangeCountOne)
+            : localizer.Get(AppText.ChangeCountMany, count);
 
     public void Dispose()
     {
@@ -257,6 +274,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _requestCancellation?.Dispose();
         _fallbackTimer.Stop();
         _focusWatcher.Dispose();
+        _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _overlay.Close();
     }
 
