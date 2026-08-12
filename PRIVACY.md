@@ -1,22 +1,22 @@
-# Datenschutz
+# Privacy
 
-Codex Language Fix verarbeitet Text ausschließlich nach einem ausdrücklichen Klick auf den `Aa`-Knopf.
+Codex Language Fix processes text only after you explicitly click the `Aa` button.
 
-## Übertragene Daten
+## Data transmitted
 
-Der aktuelle Prompt wird per HTTPS an die öffentliche LanguageTool-Schnittstelle unter `https://api.languagetool.org/v2/check` gesendet. Für die Verarbeitung gelten die Datenschutzbedingungen des LanguageTool-Betreibers.
+The current prompt is sent over HTTPS to the public LanguageTool endpoint at `https://api.languagetool.org/v2/check`. Processing is subject to the privacy terms of the LanguageTool service provider.
 
-## Nicht übertragene Daten
+## Data not transmitted
 
-- Ohne Klick wird kein Prompt übertragen.
-- Die Zwischenablage wird weder gelesen noch verändert.
-- Die App überträgt keine Zugangsdaten oder API-Schlüssel.
-- Technische Bereiche wie Code, URLs und Pfade werden vor Änderungen geschützt, befinden sich jedoch weiterhin im an LanguageTool gesendeten Gesamttext.
+- No prompt is transmitted unless you click the correction button.
+- The clipboard is never read or modified.
+- The app does not transmit credentials or API keys.
+- Technical sections such as code, URLs, and file paths are protected from correction, but they remain part of the complete text sent to LanguageTool.
 
-## Lokale Protokolle
+## Local logs
 
-Prompttexte, korrigierte Texte und API-Antworten werden nicht protokolliert. Diagnoseprotokolle enthalten ausschließlich Zeitpunkt, Vorgangsart, Dauer, HTTP-Statuscode, Zeichenanzahl und Trefferanzahl. Diese Dateien werden nach sieben Tagen gelöscht.
+Prompt text, corrected text, and API responses are never logged. Diagnostic logs contain only the timestamp, operation type, duration, HTTP status code, character count, and match count. These files are deleted after seven days.
 
-## Deinstallation
+## Uninstallation
 
-Beende die App über das Symbol im Infobereich und lösche anschließend den Programmordner. Einstellungen und Diagnoseprotokolle liegen unter `%LOCALAPPDATA%\CodexLanguageFix` und können separat gelöscht werden.
+Exit the app from its system tray menu, then delete the application folder. Settings and diagnostic logs are stored under `%LOCALAPPDATA%\CodexLanguageFix` and can be deleted separately.

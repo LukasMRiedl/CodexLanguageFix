@@ -1,13 +1,13 @@
-# Sicherheitsrichtlinie
+# Security Policy
 
-Bitte veröffentliche Sicherheitslücken nicht unmittelbar als öffentlichen Issue. Melde sie stattdessen über GitHubs Funktion **Report a vulnerability**, sofern diese im Repository verfügbar ist.
+Please do not disclose security vulnerabilities directly in a public issue. Instead, use GitHub's **Report a vulnerability** feature if it is available for this repository.
 
-Hilfreich sind:
+Please include:
 
-- betroffene Version,
-- Windows-Version,
-- reproduzierbare Schritte,
-- erwartetes und tatsächliches Verhalten,
-- eine Einschätzung möglicher Auswirkungen.
+- the affected application version,
+- the Windows version,
+- reproducible steps,
+- the expected and actual behavior,
+- an assessment of the potential impact.
 
-Füge keine Prompts, Zugangsdaten, Tokens oder anderen vertraulichen Inhalte bei.
+Do not include prompts, credentials, tokens, or other confidential information.
