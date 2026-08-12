@@ -1,45 +1,47 @@
 # Codex Language Fix
 
-Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Die App verwendet Windows UI Automation und die kostenlose öffentliche LanguageTool-API. Sie benötigt weder ein Codex-Plugin noch eine Browsererweiterung oder einen eigenen Server.
+**English** · [Deutsch](README.de.md)
 
-> Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
+A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop and Antigravity. It uses Windows UI Automation and the free public LanguageTool API. No Codex plugin, browser extension, or self-hosted server is required.
 
-## Funktionen
+> This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-- Ein unaufdringlicher `Aa`-Knopf erscheint dynamisch in der aktuellen Eingabeleiste.
-- Ein Klick prüft Rechtschreibung, Grammatik, Zeichensetzung und Stil.
-- Deutsch und Englisch werden automatisch erkannt; bevorzugt werden `de-DE` und `en-US`.
-- Markdown-Codeblöcke, Inline-Code, URLs, E-Mail-Adressen, Pfade, Befehlsoptionen und typische Codebezeichner bleiben unverändert.
-- Die Zwischenablage wird weder gelesen noch verändert.
-- Der Prompt wird nur nach einem ausdrücklichen Klick übertragen.
-- Änderungen lassen sich direkt rückgängig machen.
-- Unterschiedliche Fensterbreiten, DPI-Skalierungen sowie Chat-, Work- und Planen-Layouts werden dynamisch erkannt.
-- Kein Hintergrunddienst und keine automatische Updatefunktion.
+## Features
+
+- A subtle `Aa` button dynamically appears inside the active prompt bar.
+- One click checks spelling, grammar, punctuation, and style.
+- German and English are detected automatically, with `de-DE` and `en-US` as the preferred variants.
+- Markdown code blocks, inline code, URLs, email addresses, file paths, command-line options, and common code identifiers remain unchanged.
+- The clipboard is never read or modified.
+- Prompt text is transmitted only after an explicit click.
+- Corrections can be undone immediately.
+- Different window widths, DPI scaling levels, and Chat, Work, and Plan layouts are detected dynamically.
+- No background service and no automatic updater.
 
 ## Installation
 
-1. Lade im Bereich **Releases** die Datei `CodexLanguageFix-win-x64.zip` herunter.
-2. Entpacke die ZIP-Datei in einen dauerhaft verfügbaren Ordner.
-3. Starte `CodexLanguageFix.exe`.
-4. Bestätige beim ersten Start den Hinweis zur Übertragung an LanguageTool.
+1. Download `CodexLanguageFix-win-x64.zip` from the [latest release](https://github.com/LukasMRiedl/CodexLanguageFix/releases/latest).
+2. Extract the ZIP archive to a permanent folder.
+3. Run `CodexLanguageFix.exe`.
+4. On first launch, acknowledge that prompts are sent to LanguageTool only when you click the correction button.
 
-Die App benötigt keine Administratorrechte. Sie kann über das Symbol im Infobereich pausiert oder beendet werden. Der automatische Windows-Start lässt sich dort ebenfalls ändern.
+The app does not require administrator privileges. Its system tray menu lets you pause or exit the app and enable or disable automatic startup with Windows.
 
-Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb beim ersten Start einen Sicherheitshinweis anzeigen.
+The published executable is currently not code-signed. Windows may therefore display a security warning the first time you launch it.
 
-## Datenschutz
+## Privacy
 
-Erst nach einem Klick sendet die App den aktuellen Prompt per HTTPS an `https://api.languagetool.org/v2/check`. Prompttexte und API-Antworten werden nicht protokolliert. Lokale Diagnoseprotokolle enthalten nur technische Metadaten wie Zeitpunkt, Dauer, Statuscode, Zeichen- und Trefferanzahl und werden nach sieben Tagen entfernt.
+Only after you click the correction button does the app send the current prompt over HTTPS to `https://api.languagetool.org/v2/check`. Prompt text and API responses are never logged. Local diagnostic logs contain only technical metadata such as timestamp, duration, status code, character count, and match count. They are deleted after seven days.
 
-Weitere Einzelheiten stehen in [PRIVACY.md](PRIVACY.md).
+See [PRIVACY.md](PRIVACY.md) for more information.
 
-## Öffentliche API-Grenzen
+## Public API limits
 
-Die App begrenzt die Nutzung lokal auf höchstens 20 Anfragen und 75.000 Zeichen pro Minute sowie 20.000 Zeichen pro Anfrage. Sie erzeugt keine Warteschlange, keine Hintergrundprüfungen und keine automatischen Wiederholungen.
+The app locally limits usage to 20 requests and 75,000 characters per minute, with no more than 20,000 characters per request. It creates no queue, performs no background checks, and makes no automatic retries.
 
-## Bauen und testen
+## Build and test
 
-Voraussetzung ist das .NET 8 SDK unter Windows.
+The .NET 8 SDK on Windows is required.
 
 ```powershell
 dotnet test .\CodexLanguageFix.sln
@@ -50,17 +52,17 @@ dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj `
   -p:PublishSingleFile=true
 ```
 
-Die selbstenthaltende Einzeldatei liegt anschließend unter:
+The resulting self-contained executable is written to:
 
 `src\CodexLanguageFix\bin\Release\net8.0-windows\win-x64\publish\CodexLanguageFix.exe`
 
-## Unterstützte Anwendungen
+## Supported applications
 
-- OpenAI Codex Desktop für Windows
-- Antigravity für Windows
+- OpenAI Codex Desktop for Windows
+- Antigravity for Windows
 
-Die Erkennung verwendet zugängliche UI-Strukturen und keine fest codierten Bildschirmkoordinaten.
+Application detection relies on accessible UI structures rather than hard-coded screen coordinates.
 
-## Rechtlicher Status
+## Legal status
 
-Der Quellcode wird öffentlich bereitgestellt. Es wurde noch keine Open-Source-Lizenz erteilt. Ohne eine ausdrückliche Lizenz gelten die gesetzlichen Urheberrechtsbestimmungen.
+The source code is publicly available, but no open-source license has been granted. Unless an explicit license is added, standard copyright law applies.
