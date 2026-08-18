@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
@@ -281,11 +282,20 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardInputEncoding = new UTF8Encoding(false),
+                StandardOutputEncoding = new UTF8Encoding(false),
+                StandardErrorEncoding = new UTF8Encoding(false),
                 CreateNoWindow = true,
                 WorkingDirectory = _runtimeDirectory
             };
-            startInfo.ArgumentList.Add("app-server");
             Directory.CreateDirectory(_runtimeDirectory);
+            var privateCatalog = LunaModelCatalogOverride.TryCreate(_runtimeDirectory);
+            if (privateCatalog is not null)
+            {
+                startInfo.ArgumentList.Add("-c");
+                startInfo.ArgumentList.Add($"model_catalog_json={JsonSerializer.Serialize(privateCatalog)}");
+            }
+            startInfo.ArgumentList.Add("app-server");
             var process = Process.Start(startInfo)
                 ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexAppServerStartFailed));
             var connection = new JsonRpcLineConnection(process.StandardOutput, process.StandardInput);

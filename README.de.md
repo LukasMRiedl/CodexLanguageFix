@@ -30,7 +30,9 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 Die App benötigt keine Administratorrechte. Über das Symbol im Infobereich lassen sich der Korrekturanbieter auswählen, OpenAI verbinden, der ausgewählte Anbieter testen, die App pausieren oder beenden und der automatische Windows-Start ändern.
 
-LanguageTool funktioniert ohne zusätzliche Software. Der optionale Luna-Anbieter setzt eine installierte, aktuelle offizielle Codex-Laufzeit und ein in Codex verfügbares ChatGPT-Konto voraus. Ist Luna Low in Codex nicht aktiviert, bleibt der Prompt unverändert; Codex Language Fix wechselt niemals still auf ein anderes Modell, eine andere Denkstufe oder einen anderen Anbieter.
+LanguageTool funktioniert ohne zusätzliche Software. Der optionale Luna-Anbieter setzt eine installierte, aktuelle offizielle Codex-Laufzeit und ein in Codex verfügbares ChatGPT-Konto voraus. Ist Luna Low nicht verfügbar, bleibt der Prompt unverändert; Codex Language Fix wechselt niemals still auf ein anderes Modell, eine andere Denkstufe oder einen anderen Anbieter.
+
+Wenn der aktive Codex-Modellkatalog Luna Low bewusst ausblendet, erzeugt Codex Language Fix unter `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` eine app-eigene Katalogkopie und aktiviert Low ausschließlich für seinen eigenen App-Server-Prozess. Der globale Codex-Katalog wird nicht verändert; Luna Low erscheint deshalb nicht als zusätzliche Auswahl in Codex Desktop.
 
 Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb beim ersten Start einen Sicherheitshinweis anzeigen.
 
