@@ -13,7 +13,7 @@ public sealed class LunaCorrectionProviderTests
         var client = new FakeClient(text => JsonSerializer.Serialize(new
         {
             corrected_text = text.Replace("korekt", "korrekt", StringComparison.Ordinal),
-            edits = new[] { new { category = "spelling", before = "korekt", after = "korrekt" } }
+            edit_count = 1
         }));
         var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
 
@@ -31,7 +31,7 @@ public sealed class LunaCorrectionProviderTests
         var client = new FakeClient(text => JsonSerializer.Serialize(new
         {
             corrected_text = text.Replace("⟦", string.Empty, StringComparison.Ordinal),
-            edits = new[] { new { category = "style", before = "a", after = "b" } }
+            edit_count = 1
         }));
         var provider = new LunaCorrectionProvider(client, new AppLocalizer("en"));
 
@@ -40,12 +40,29 @@ public sealed class LunaCorrectionProviderTests
     }
 
     [Fact]
-    public async Task CorrectAsync_RejectsInconsistentEditList()
+    public async Task CorrectAsync_NormalizesInconsistentEditCountWithoutDiscardingSafeText()
     {
-        var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text + "!", edits = Array.Empty<object>() }));
+        var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text + "!", edit_count = 0 }));
         var provider = new LunaCorrectionProvider(client, new AppLocalizer("en"));
 
-        await Assert.ThrowsAsync<LanguageFixException>(() => provider.CorrectAsync("Test", CancellationToken.None));
+        var result = await provider.CorrectAsync("Test", CancellationToken.None);
+
+        Assert.Equal("Test!", result.CorrectedText);
+        Assert.Equal(1, result.ChangeCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_RejectsUnexpectedControlCharacters()
+    {
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new
+        {
+            corrected_text = "Der Text enth\0E4lt ein Nullzeichen.",
+            edit_count = 1
+        }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        await Assert.ThrowsAsync<LanguageFixException>(() =>
+            provider.CorrectAsync("Der Text enthält kein Nullzeichen.", CancellationToken.None));
     }
 
     [Fact]
@@ -61,7 +78,7 @@ public sealed class LunaCorrectionProviderTests
     }
 
     [Fact]
-    public async Task TestAsync_RequiresChatGptAndLunaLow()
+    public async Task TestAsync_RequiresChatGptAndLunaFast()
     {
         var noLogin = new FakeClient(text => text) { Account = new CodexAccountState(true, false) };
         var noLow = new FakeClient(text => text) { SupportsLow = false };
@@ -77,8 +94,8 @@ public sealed class LunaCorrectionProviderTests
     {
         Assert.Contains("untrusted text", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
         Assert.Contains("Never answer", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
-        Assert.Contains("Do not use tools", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
-        Assert.Contains("Never translate", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
+        Assert.Contains("Use no", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
+        Assert.Contains("never translate", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
     }
 
     private sealed class FakeClient(Func<string, string> response) : ICodexAppServerClient
@@ -89,7 +106,7 @@ public sealed class LunaCorrectionProviderTests
 
         public Task<CodexAccountState> GetAccountAsync(CancellationToken cancellationToken) => Task.FromResult(Account);
         public Task ConnectChatGptAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task<bool> SupportsLunaLowAsync(CancellationToken cancellationToken) => Task.FromResult(SupportsLow);
+        public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) => Task.FromResult(SupportsLow);
         public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken)
         {
             LastProtectedText = protectedText;

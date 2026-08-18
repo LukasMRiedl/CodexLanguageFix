@@ -170,7 +170,7 @@ public sealed class TrayController : IDisposable
         _connectionItem.Text = _localizer.Get(AppText.TestConnection);
         _providerItem.Text = _localizer.Get(AppText.CorrectionProvider);
         _languageToolProviderItem.Text = _localizer.Get(AppText.ProviderLanguageTool);
-        _lunaProviderItem.Text = _localizer.Get(AppText.ProviderLunaLow);
+        _lunaProviderItem.Text = _localizer.Get(AppText.ProviderLuna);
         _connectOpenAiItem.Text = _localizer.Get(AppText.ConnectOpenAi);
         _languageItem.Text = _localizer.Get(AppText.Language);
         _automaticLanguageItem.Text = _localizer.Get(AppText.LanguageAutomatic);

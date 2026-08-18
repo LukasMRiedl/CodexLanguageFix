@@ -40,18 +40,18 @@ internal static partial class LunaModelCatalogOverride
                 return null;
             }
 
-            var hasLow = efforts
+            var hasRequiredEffort = efforts
                 .OfType<JsonObject>()
                 .Any(option => string.Equals(
                     option["effort"]?.GetValue<string>(),
                     CodexAppServerClient.LunaEffort,
                     StringComparison.Ordinal));
-            if (!hasLow)
+            if (!hasRequiredEffort)
             {
                 efforts.Insert(0, new JsonObject
                 {
                     ["effort"] = CodexAppServerClient.LunaEffort,
-                    ["description"] = "Fast, focused reasoning for latency-sensitive text correction"
+                    ["description"] = "No reasoning for lowest-latency text correction"
                 });
             }
 

@@ -7,7 +7,7 @@ Codex Language Fix processes text only after you explicitly click the `Aa` butto
 The current prompt is sent only to the provider selected in the system tray:
 
 - **LanguageTool:** the prompt is sent over HTTPS to the public endpoint at `https://api.languagetool.org/v2/check`. Processing is subject to LanguageTool's privacy terms.
-- **OpenAI Luna:** prose is sent through the official Codex App Server to `gpt-5.6-luna` with Low reasoning. The request uses a fresh ephemeral thread. Processing and usage limits are subject to the terms of the ChatGPT account connected to Codex.
+- **OpenAI Luna:** prose is sent through the official Codex App Server to `gpt-5.6-luna` without reasoning and with Fast mode. The request uses a fresh ephemeral thread. Processing and usage limits are subject to the terms of the ChatGPT account connected to Codex.
 
 ## Data not transmitted
 

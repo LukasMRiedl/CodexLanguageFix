@@ -6,7 +6,7 @@ namespace CodexLanguageFix.Tests;
 public sealed class LiveLunaCorrectionTests
 {
     [Fact]
-    public async Task LunaLow_LiveOAuthCorrectsGermanAndPreservesTechnicalText()
+    public async Task LunaFast_LiveOAuthCorrectsGermanAndPreservesTechnicalText()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_LUNA_LIVE_TEST"),
@@ -21,7 +21,7 @@ public sealed class LiveLunaCorrectionTests
         using var client = new CodexAppServerClient(directory, localizer);
         var account = await client.GetAccountAsync(CancellationToken.None);
         Assert.True(account.IsChatGpt, "Für den Live-Test muss Codex mit ChatGPT-OAuth angemeldet sein.");
-        Assert.True(await client.SupportsLunaLowAsync(CancellationToken.None), "Luna Low muss in Codex aktiviert sein.");
+        Assert.True(await client.SupportsLunaAsync(CancellationToken.None), "Luna ohne Denkmodus und mit Fast Mode muss verfügbar sein.");
 
         var provider = new LunaCorrectionProvider(client, localizer);
         var result = await provider.CorrectAsync(

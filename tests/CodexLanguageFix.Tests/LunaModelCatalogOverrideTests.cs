@@ -8,7 +8,7 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"clf-catalog-{Guid.NewGuid():N}");
 
     [Fact]
-    public void TryCreate_AddsLowOnlyToPrivateCopy()
+    public void TryCreate_AddsNoneOnlyToPrivateCopy()
     {
         var codexHome = Path.Combine(_root, ".codex");
         var runtime = Path.Combine(_root, "runtime");
@@ -21,23 +21,25 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
 
         Assert.NotNull(output);
         Assert.NotEqual(source, output);
-        Assert.DoesNotContain("\"effort\":\"low\"", File.ReadAllText(source), StringComparison.Ordinal);
+        Assert.DoesNotContain("\"effort\":\"none\"", File.ReadAllText(source), StringComparison.Ordinal);
         using var document = JsonDocument.Parse(File.ReadAllText(output!));
         var efforts = document.RootElement.GetProperty("models")[0].GetProperty("supported_reasoning_levels");
-        Assert.Equal(["low", "max"], efforts.EnumerateArray().Select(item => item.GetProperty("effort").GetString()));
+        Assert.Equal(
+            ["none", "max"],
+            efforts.EnumerateArray().Select(item => item.GetProperty("effort").GetString()));
         Assert.Equal("max", document.RootElement.GetProperty("models")[0].GetProperty("default_reasoning_level").GetString());
         Assert.Equal("list", document.RootElement.GetProperty("models")[0].GetProperty("visibility").GetString());
     }
 
     [Fact]
-    public void TryCreate_DoesNotDuplicateExistingLow()
+    public void TryCreate_DoesNotDuplicateExistingNone()
     {
         var codexHome = Path.Combine(_root, ".codex");
         var runtime = Path.Combine(_root, "runtime");
         Directory.CreateDirectory(codexHome);
         File.WriteAllText(Path.Combine(codexHome, "catalog.json"), CatalogJson.Replace(
             "{\"effort\":\"max\",\"description\":\"Maximum\"}",
-            "{\"effort\":\"low\",\"description\":\"Fast\"},{\"effort\":\"max\",\"description\":\"Maximum\"}",
+            "{\"effort\":\"none\",\"description\":\"No reasoning\"},{\"effort\":\"max\",\"description\":\"Maximum\"}",
             StringComparison.Ordinal));
         File.WriteAllText(Path.Combine(codexHome, "config.toml"), "model_catalog_json = \"catalog.json\"\n");
 
@@ -45,7 +47,8 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
 
         using var document = JsonDocument.Parse(File.ReadAllText(output!));
         var efforts = document.RootElement.GetProperty("models")[0].GetProperty("supported_reasoning_levels");
-        Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "low");
+        Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "none");
+        Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "max");
     }
 
     [Fact]

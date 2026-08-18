@@ -8,7 +8,7 @@ public interface ICodexAppServerClient : IDisposable
 
     Task ConnectChatGptAsync(CancellationToken cancellationToken);
 
-    Task<bool> SupportsLunaLowAsync(CancellationToken cancellationToken);
+    Task<bool> SupportsLunaAsync(CancellationToken cancellationToken);
 
     Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken);
 }

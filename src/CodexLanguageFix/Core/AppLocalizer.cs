@@ -13,7 +13,7 @@ public enum AppText
     TestConnection,
     CorrectionProvider,
     ProviderLanguageTool,
-    ProviderLunaLow,
+    ProviderLuna,
     ConnectOpenAi,
     Language,
     LanguageAutomatic,
@@ -66,7 +66,7 @@ public enum AppText
     OpenAiLoginFailed,
     OpenAiLoginRequired,
     OpenAiConnected,
-    LunaLowUnavailable,
+    LunaUnavailable,
     LunaRequestFailed,
     LunaUnexpectedTool,
     LunaInvalidResponse,
@@ -147,7 +147,7 @@ public sealed class AppLocalizer
         [AppText.TestConnection] = "Test selected provider",
         [AppText.CorrectionProvider] = "Correction provider",
         [AppText.ProviderLanguageTool] = "LanguageTool",
-        [AppText.ProviderLunaLow] = "OpenAI Luna · Low",
+        [AppText.ProviderLuna] = "OpenAI Luna · Fast",
         [AppText.ConnectOpenAi] = "Connect OpenAI",
         [AppText.Language] = "Language",
         [AppText.LanguageAutomatic] = "Automatic (Windows)",
@@ -200,11 +200,11 @@ public sealed class AppLocalizer
         [AppText.OpenAiLoginFailed] = "OpenAI sign-in was not completed successfully.",
         [AppText.OpenAiLoginRequired] = "Connect OpenAI from the tray menu before using Luna.",
         [AppText.OpenAiConnected] = "OpenAI is connected",
-        [AppText.LunaLowUnavailable] = "GPT-5.6 Luna with Low reasoning is not enabled in Codex. Enable Luna Low in Codex settings; the app will not fall back to another model or effort.",
+        [AppText.LunaUnavailable] = "GPT-5.6 Luna without reasoning and with Fast mode is unavailable. Update Codex and try again; the app will not fall back to another model or mode.",
         [AppText.LunaRequestFailed] = "Luna could not complete the correction. The prompt was not changed.",
         [AppText.LunaUnexpectedTool] = "Luna attempted an operation outside text correction. The response was rejected.",
         [AppText.LunaInvalidResponse] = "Luna returned an invalid or unsafe correction. The prompt was not changed.",
-        [AppText.LunaTimeout] = "Luna did not complete the correction within 45 seconds."
+        [AppText.LunaTimeout] = "Luna did not complete the correction within 60 seconds."
     };
 
     private static readonly IReadOnlyDictionary<AppText, string> GermanTexts = new Dictionary<AppText, string>
@@ -218,7 +218,7 @@ public sealed class AppLocalizer
         [AppText.TestConnection] = "Ausgewählten Anbieter testen",
         [AppText.CorrectionProvider] = "Korrekturanbieter",
         [AppText.ProviderLanguageTool] = "LanguageTool",
-        [AppText.ProviderLunaLow] = "OpenAI Luna · Niedrig",
+        [AppText.ProviderLuna] = "OpenAI Luna · Schnell",
         [AppText.ConnectOpenAi] = "OpenAI verbinden",
         [AppText.Language] = "Sprache",
         [AppText.LanguageAutomatic] = "Automatisch (Windows)",
@@ -271,10 +271,10 @@ public sealed class AppLocalizer
         [AppText.OpenAiLoginFailed] = "Die OpenAI-Anmeldung wurde nicht erfolgreich abgeschlossen.",
         [AppText.OpenAiLoginRequired] = "Verbinde OpenAI zuerst über das Menü im Infobereich, bevor du Luna verwendest.",
         [AppText.OpenAiConnected] = "OpenAI ist verbunden",
-        [AppText.LunaLowUnavailable] = "GPT-5.6 Luna mit niedriger Denkstufe ist in Codex nicht aktiviert. Aktiviere Luna Low in den Codex-Einstellungen; die App wechselt nicht auf ein anderes Modell oder eine andere Denkstufe.",
+        [AppText.LunaUnavailable] = "GPT-5.6 Luna ohne Denkmodus und mit Fast Mode ist nicht verfügbar. Aktualisiere Codex und versuche es erneut; die App wechselt nicht auf ein anderes Modell oder einen anderen Modus.",
         [AppText.LunaRequestFailed] = "Luna konnte die Korrektur nicht abschließen. Der Prompt wurde nicht verändert.",
         [AppText.LunaUnexpectedTool] = "Luna hat eine Aktion außerhalb der Textkorrektur versucht. Die Antwort wurde verworfen.",
         [AppText.LunaInvalidResponse] = "Luna hat eine ungültige oder unsichere Korrektur geliefert. Der Prompt wurde nicht verändert.",
-        [AppText.LunaTimeout] = "Luna hat die Korrektur nicht innerhalb von 45 Sekunden abgeschlossen."
+        [AppText.LunaTimeout] = "Luna hat die Korrektur nicht innerhalb von 60 Sekunden abgeschlossen."
     };
 }

@@ -2,7 +2,7 @@
 
 [English](README.md) · **Deutsch**
 
-Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna mit niedriger Denkstufe über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen API-Schlüssel oder einen eigenen Server.
+Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna im Fast Mode ohne Denkmodus über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen API-Schlüssel oder einen eigenen Server.
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
@@ -10,7 +10,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 - Ein unaufdringlicher `Aa`-Knopf erscheint dynamisch in der aktuellen Eingabeleiste.
 - Ein Klick prüft Rechtschreibung, Grammatik, Zeichensetzung und Stil.
-- LanguageTool bleibt der Standardanbieter. OpenAI Luna lässt sich im Infobereich auswählen und wird ausschließlich als `gpt-5.6-luna` mit niedriger Denkstufe verwendet.
+- LanguageTool bleibt der standardmäßige und schnellste Anbieter. OpenAI Luna lässt sich im Infobereich auswählen und wird ausschließlich als `gpt-5.6-luna` ohne Denkmodus und mit Fast Mode verwendet.
 - Luna nutzt den offiziellen Codex App Server und dessen verwalteten ChatGPT-OAuth-Ablauf. Die App liest oder speichert niemals OAuth-Tokens.
 - Deutsch und Englisch werden automatisch erkannt; bevorzugt werden `de-DE` und `en-US`.
 - Die gesamte Oberfläche ist auf Deutsch und Englisch verfügbar. Standardmäßig folgt sie der Windows-Anzeigesprache und lässt sich jederzeit über das Menü im Infobereich umschalten.
@@ -30,15 +30,15 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 Die App benötigt keine Administratorrechte. Über das Symbol im Infobereich lassen sich der Korrekturanbieter auswählen, OpenAI verbinden, der ausgewählte Anbieter testen, die App pausieren oder beenden und der automatische Windows-Start ändern.
 
-LanguageTool funktioniert ohne zusätzliche Software. Der optionale Luna-Anbieter setzt eine installierte, aktuelle offizielle Codex-Laufzeit und ein in Codex verfügbares ChatGPT-Konto voraus. Ist Luna Low nicht verfügbar, bleibt der Prompt unverändert; Codex Language Fix wechselt niemals still auf ein anderes Modell, eine andere Denkstufe oder einen anderen Anbieter.
+LanguageTool funktioniert ohne zusätzliche Software. Der optionale Luna-Anbieter setzt eine installierte, aktuelle offizielle Codex-Laufzeit und ein in Codex verfügbares ChatGPT-Konto voraus. Ist Luna oder der Fast Mode nicht verfügbar, bleibt der Prompt unverändert; Codex Language Fix wechselt niemals still auf ein anderes Modell, einen anderen Modus oder einen anderen Anbieter.
 
-Wenn der aktive Codex-Modellkatalog Luna Low bewusst ausblendet, erzeugt Codex Language Fix unter `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` eine app-eigene Katalogkopie und aktiviert Low ausschließlich für seinen eigenen App-Server-Prozess. Der globale Codex-Katalog wird nicht verändert; Luna Low erscheint deshalb nicht als zusätzliche Auswahl in Codex Desktop.
+Wenn der aktive Codex-Modellkatalog Lunas Modus ohne Thinking bewusst ausblendet, erzeugt Codex Language Fix unter `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` eine app-eigene Katalogkopie und aktiviert ihn ausschließlich für seinen eigenen App-Server-Prozess. Der globale Codex-Katalog wird nicht verändert; dieser zusätzliche Modus erscheint deshalb nicht in Codex Desktop.
 
 Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb beim ersten Start einen Sicherheitshinweis anzeigen.
 
 ## Datenschutz
 
-Erst nach einem Klick sendet die App den aktuellen Prompt an den ausgewählten Anbieter. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna-Anfragen verwenden einen ephemeren Codex-App-Server-Thread mit `gpt-5.6-luna`, niedriger Denkstufe, einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Jede beobachtete Werkzeugaktion verwirft die gesamte Antwort. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
+Erst nach einem Klick sendet die App den aktuellen Prompt an den ausgewählten Anbieter. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna-Anfragen verwenden einen ephemeren Codex-App-Server-Thread mit `gpt-5.6-luna`, ohne Denkmodus, mit Fast Mode, einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Jede beobachtete Werkzeugaktion verwirft die gesamte Antwort. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
 
 Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden niemals protokolliert. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt.
 
