@@ -16,6 +16,14 @@ public sealed class OverlayWindowTests
     }
 
     [Theory]
+    [InlineData("de", 1, "1 Änderung · Luna")]
+    [InlineData("en", 2, "2 changes · Luna")]
+    public void LunaChangeCount_IncludesProvider(string language, int count, string expected)
+    {
+        Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count, CorrectionProviderKind.Luna, new AppLocalizer(language)));
+    }
+
+    [Theory]
     [InlineData("Das ist korrekt.", "Das ist korrekt.", true)]
     [InlineData("Das ist korrekt.\r", "Das ist korrekt.", true)]
     [InlineData("Das ist korrekt.\n", "Das ist korrekt.", true)]

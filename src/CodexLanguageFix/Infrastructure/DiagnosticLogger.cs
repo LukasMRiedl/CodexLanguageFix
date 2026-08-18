@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using CodexLanguageFix.Core;
 
 namespace CodexLanguageFix.Infrastructure;
 
@@ -15,12 +16,19 @@ public sealed class DiagnosticLogger
         RemoveExpiredLogs();
     }
 
-    public void Write(string eventName, int? characterCount = null, int? matchCount = null, int? statusCode = null, double? elapsedMilliseconds = null)
+    public void Write(
+        string eventName,
+        int? characterCount = null,
+        int? matchCount = null,
+        int? statusCode = null,
+        double? elapsedMilliseconds = null,
+        CorrectionProviderKind? provider = null)
     {
         var entry = new
         {
             timestamp = DateTimeOffset.Now,
             eventName,
+            provider = provider?.ToString(),
             characterCount,
             matchCount,
             statusCode,

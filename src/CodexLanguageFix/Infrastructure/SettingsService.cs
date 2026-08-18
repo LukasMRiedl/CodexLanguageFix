@@ -28,7 +28,13 @@ public sealed class SettingsService
                 return new AppSettings();
             }
 
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path), JsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path), JsonOptions) ?? new AppSettings();
+            if (!Enum.IsDefined(settings.CorrectionProvider))
+            {
+                settings.CorrectionProvider = CorrectionProviderKind.LanguageTool;
+            }
+
+            return settings;
         }
         catch (IOException)
         {

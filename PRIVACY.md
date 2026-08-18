@@ -4,18 +4,24 @@ Codex Language Fix processes text only after you explicitly click the `Aa` butto
 
 ## Data transmitted
 
-The current prompt is sent over HTTPS to the public LanguageTool endpoint at `https://api.languagetool.org/v2/check`. Processing is subject to the privacy terms of the LanguageTool service provider.
+The current prompt is sent only to the provider selected in the system tray:
+
+- **LanguageTool:** the prompt is sent over HTTPS to the public endpoint at `https://api.languagetool.org/v2/check`. Processing is subject to LanguageTool's privacy terms.
+- **OpenAI Luna:** prose is sent through the official Codex App Server to `gpt-5.6-luna` with Low reasoning. The request uses a fresh ephemeral thread. Processing and usage limits are subject to the terms of the ChatGPT account connected to Codex.
 
 ## Data not transmitted
 
 - No prompt is transmitted unless you click the correction button.
 - The clipboard is never read or modified.
-- The app does not transmit credentials or API keys.
-- Technical sections such as code, URLs, and file paths are protected from correction, but they remain part of the complete text sent to LanguageTool.
+- The app does not transmit API keys and never reads, stores, or logs OAuth tokens. OAuth is owned and refreshed by the official Codex runtime.
+- With LanguageTool, technical sections are protected from correction but remain part of the annotated request.
+- With Luna, code, URLs, email addresses, link targets, file paths, command-line options, and code identifiers are replaced locally with random opaque placeholders. Their original contents are not sent to Luna.
 
 ## Local logs
 
-Prompt text, corrected text, and API responses are never logged. Diagnostic logs contain only the timestamp, operation type, duration, HTTP status code, character count, and match count. These files are deleted after seven days.
+Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never logged. Diagnostic logs contain only the provider, timestamp, operation type, duration, optional HTTP status code, character count, and change count. These files are deleted after seven days.
+
+The app does not offer an OpenAI logout command because the OAuth session is shared with the official Codex installation. Sign-out remains under Codex's control.
 
 ## Uninstallation
 

@@ -1,5 +1,22 @@
 namespace CodexLanguageFix.Core;
 
+public enum CorrectionProviderKind
+{
+    LanguageTool,
+    Luna
+}
+
+public sealed record CorrectionProviderResult(
+    string CorrectedText,
+    int ChangeCount,
+    CorrectionProviderKind Provider,
+    int? StatusCode,
+    TimeSpan Elapsed);
+
+public sealed record CorrectionProviderHealth(CorrectionProviderKind Provider, TimeSpan Elapsed);
+
+public sealed record CodexAccountState(bool RequiresOpenAiAuth, bool IsChatGpt);
+
 public readonly record struct TextSpan(int Start, int Length)
 {
     public int End => Start + Length;
@@ -46,3 +63,5 @@ public sealed class RateLimitException(string message, TimeSpan retryAfter) : La
 {
     public TimeSpan RetryAfter { get; } = retryAfter;
 }
+
+public sealed class CodexAppServerException(string message, Exception? innerException = null) : LanguageFixException(message, innerException);

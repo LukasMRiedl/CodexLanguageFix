@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
 {
     private Mutex? _singleInstanceMutex;
     private LanguageToolClient? _languageToolClient;
+    private CodexAppServerClient? _codexAppServerClient;
     private TrayController? _tray;
     private CorrectionCoordinator? _coordinator;
 
@@ -57,12 +58,16 @@ public partial class App : System.Windows.Application
         }
 
         _languageToolClient = new LanguageToolClient(localizer: localizer);
+        _codexAppServerClient = new CodexAppServerClient(settingsService.ApplicationDirectory, localizer);
+        var correctionEngine = new CorrectionEngine();
+        var languageToolProvider = new LanguageToolCorrectionProvider(_languageToolClient, correctionEngine);
+        var lunaProvider = new LunaCorrectionProvider(_codexAppServerClient, localizer);
         _tray = new TrayController(settings, settingsService, autostartService, localizer);
         var overlay = new OverlayWindow(localizer);
         _coordinator = new CorrectionCoordinator(
             new CodexComposerAccessor(),
-            _languageToolClient,
-            new CorrectionEngine(),
+            [languageToolProvider, lunaProvider],
+            lunaProvider,
             overlay,
             _tray,
             logger,
@@ -78,6 +83,7 @@ public partial class App : System.Windows.Application
         _coordinator?.Dispose();
         _tray?.Dispose();
         _languageToolClient?.Dispose();
+        _codexAppServerClient?.Dispose();
         if (_singleInstanceMutex is not null)
         {
             try
