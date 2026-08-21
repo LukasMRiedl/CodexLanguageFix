@@ -40,18 +40,22 @@ internal static partial class LunaModelCatalogOverride
                 return null;
             }
 
-            var hasRequiredEffort = efforts
+            var configuredEfforts = efforts
                 .OfType<JsonObject>()
-                .Any(option => string.Equals(
-                    option["effort"]?.GetValue<string>(),
-                    CodexAppServerClient.LunaEffort,
-                    StringComparison.Ordinal));
-            if (!hasRequiredEffort)
+                .Select(option => option["effort"]?.GetValue<string>())
+                .Where(effort => !string.IsNullOrWhiteSpace(effort))
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var (effort, description) in SupportedEfforts.Reverse())
             {
+                if (configuredEfforts.Contains(effort))
+                {
+                    continue;
+                }
+
                 efforts.Insert(0, new JsonObject
                 {
-                    ["effort"] = CodexAppServerClient.LunaEffort,
-                    ["description"] = "No reasoning for lowest-latency text correction"
+                    ["effort"] = effort,
+                    ["description"] = description
                 });
             }
 
@@ -104,6 +108,13 @@ internal static partial class LunaModelCatalogOverride
     {
         WriteIndented = false
     };
+
+    private static readonly (string Effort, string Description)[] SupportedEfforts =
+    [
+        ("none", "No reasoning for lowest-latency text correction"),
+        ("low", "Low reasoning for text correction"),
+        ("medium", "Medium reasoning for text correction")
+    ];
 
     [GeneratedRegex(
         "(?m)^\\s*model_catalog_json\\s*=\\s*(?:'(?<single>[^']+)'|\\\"(?<double>(?:\\\\.|[^\\\"])*)\\\")\\s*(?:#.*)?$",

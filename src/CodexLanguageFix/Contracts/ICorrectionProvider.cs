@@ -14,4 +14,6 @@ public interface ICorrectionProvider
 public interface IOpenAiConnection
 {
     Task ConnectAsync(CancellationToken cancellationToken);
+
+    Task WarmUpAsync(CancellationToken cancellationToken);
 }

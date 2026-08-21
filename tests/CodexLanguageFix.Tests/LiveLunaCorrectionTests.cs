@@ -32,5 +32,9 @@ public sealed class LiveLunaCorrectionTests
         Assert.Contains("Satz", result.CorrectedText, StringComparison.Ordinal);
         Assert.Contains("korrekt", result.CorrectedText, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.ChangeCount >= 1);
+        Assert.NotNull(result.LunaExecution);
+        Assert.Equal("baseline", result.LunaExecution.PromptProfile);
+        Assert.Equal("none", result.LunaExecution.Effort);
+        Assert.Equal("full-v1", result.LunaExecution.Protocol);
     }
 }

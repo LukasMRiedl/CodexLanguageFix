@@ -23,6 +23,28 @@ public sealed class LunaCorrectionProviderTests
         Assert.Equal(1, result.ChangeCount);
         Assert.Equal(CorrectionProviderKind.Luna, result.Provider);
         Assert.DoesNotContain("eror", client.LastProtectedText, StringComparison.Ordinal);
+        Assert.NotNull(result.LunaExecution);
+        Assert.Equal("baseline", result.LunaExecution.PromptProfile);
+        Assert.Equal("none", result.LunaExecution.Effort);
+        Assert.Equal("priority", result.LunaExecution.ServiceTier);
+        Assert.Equal("full-v1", result.LunaExecution.Protocol);
+    }
+
+    [Fact]
+    public void QualifiedProductionProfile_MatchesTheLiveBenchmarkWinner()
+    {
+        var profile = LunaProductionConfiguration.Qualified;
+
+        Assert.Equal("baseline", profile.PromptVariant);
+        Assert.Equal(LunaPromptCatalog.Baseline, profile.DeveloperInstructions);
+        Assert.Equal("none", profile.Effort);
+        Assert.Equal("priority", profile.ServiceTier);
+        Assert.Equal(LunaOutputProtocol.FullText, profile.OutputProtocol);
+        Assert.Equal("full-v1", profile.ProtocolName);
+        Assert.Equal(int.MaxValue, profile.PatchThreshold);
+        Assert.Equal(profile.DeveloperInstructions, LunaCorrectionProvider.DeveloperPrompt);
+        Assert.Equal(profile.Effort, CodexAppServerClient.LunaEffort);
+        Assert.Equal(profile.ServiceTier, CodexAppServerClient.LunaServiceTier);
     }
 
     [Fact]
@@ -40,7 +62,7 @@ public sealed class LunaCorrectionProviderTests
     }
 
     [Fact]
-    public async Task CorrectAsync_NormalizesInconsistentEditCountWithoutDiscardingSafeText()
+    public async Task CorrectAsync_CountsAChangedFullTextResultLocally()
     {
         var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text + "!", edit_count = 0 }));
         var provider = new LunaCorrectionProvider(client, new AppLocalizer("en"));
@@ -49,6 +71,91 @@ public sealed class LunaCorrectionProviderTests
 
         Assert.Equal("Test!", result.CorrectedText);
         Assert.Equal(1, result.ChangeCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_ReusesOnlyValidatedResultsFromTheExactMemoryCache()
+    {
+        var client = new FakeClient(text => JsonSerializer.Serialize(new
+        {
+            corrected_text = text.Replace("korekt", "korrekt", StringComparison.Ordinal)
+        }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        var first = await provider.CorrectAsync("Das ist korekt.", CancellationToken.None);
+        var second = await provider.CorrectAsync("Das ist korekt.", CancellationToken.None);
+
+        Assert.Equal("Das ist korrekt.", first.CorrectedText);
+        Assert.Equal(first.CorrectedText, second.CorrectedText);
+        Assert.Equal(1, client.RunCount);
+        Assert.Equal(TimeSpan.Zero, second.Elapsed);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_UsesValidatedPatchForLongSegmentedText()
+    {
+        var client = new FakeClient(_ => throw new InvalidOperationException())
+        {
+            StructuredResponse = _ => "{\"changes\":[{\"id\":0,\"text\":\"Das ist korrekt.\"}]}"
+        };
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: LunaCorrectionProvider.DefaultPatchThreshold);
+        var input = "Das ist korekt. " + new string('a', 1_000) + ".";
+
+        var result = await provider.CorrectAsync(input, CancellationToken.None);
+
+        Assert.StartsWith("Das ist korrekt. ", result.CorrectedText, StringComparison.Ordinal);
+        Assert.Equal(1, result.ChangeCount);
+        Assert.Equal(1, client.StructuredRunCount);
+        Assert.Equal(0, client.RunCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_RetriesInvalidPatchOnceWithFullTextProtocol()
+    {
+        var client = new FakeClient(text => JsonSerializer.Serialize(new
+        {
+            corrected_text = text.Replace("korekt", "korrekt", StringComparison.Ordinal)
+        }))
+        {
+            StructuredResponse = _ => "{\"changes\":[{\"id\":999,\"text\":\"ungültig\"}]}"
+        };
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: LunaCorrectionProvider.DefaultPatchThreshold);
+        var input = "Das ist korekt. " + new string('a', 1_000) + ".";
+
+        var result = await provider.CorrectAsync(input, CancellationToken.None);
+
+        Assert.StartsWith("Das ist korrekt. ", result.CorrectedText, StringComparison.Ordinal);
+        Assert.Equal(1, client.StructuredRunCount);
+        Assert.Equal(1, client.RunCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_CanForceFullTextForIsolatedPromptBenchmarks()
+    {
+        var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text }))
+        {
+            StructuredResponse = _ => throw new InvalidOperationException("Patch darf nicht verwendet werden.")
+        };
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: int.MaxValue);
+        var input = "Absatz eins. " + new string('a', 1_200) + ".";
+
+        var result = await provider.CorrectAsync(input, CancellationToken.None);
+
+        Assert.Equal(input, result.CorrectedText);
+        Assert.Equal(1, client.RunCount);
+        Assert.Equal(0, client.StructuredRunCount);
     }
 
     [Fact]
@@ -89,28 +196,50 @@ public sealed class LunaCorrectionProviderTests
             new LunaCorrectionProvider(noLow, new AppLocalizer("en")).TestAsync(CancellationToken.None));
     }
 
-    [Fact]
-    public void Prompt_TreatsSourceAsUntrustedAndForbidsTools()
+    [Theory]
+    [InlineData("baseline")]
+    [InlineData("audit")]
+    [InlineData("safe")]
+    [InlineData("balanced")]
+    [InlineData("ultra")]
+    public void PromptVariants_PreserveTheSecurityAndMinimalEditContract(string variant)
     {
-        Assert.Contains("untrusted text", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
-        Assert.Contains("Never answer", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
-        Assert.Contains("Use no", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
-        Assert.Contains("never translate", LunaCorrectionProvider.DeveloperPrompt, StringComparison.Ordinal);
+        var prompt = LunaPromptCatalog.Get(variant);
+
+        Assert.Contains("untrusted", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("answer", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("translate", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("byte-for-byte", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CLF_PROTECTED", prompt, StringComparison.Ordinal);
     }
 
-    private sealed class FakeClient(Func<string, string> response) : ICodexAppServerClient
+    private sealed class FakeClient(Func<string, string> response) : ICodexAppServerClient, IStructuredCodexCorrectionClient
     {
         public CodexAccountState Account { get; set; } = new(true, true);
         public bool SupportsLow { get; set; } = true;
         public string? LastProtectedText { get; private set; }
+        public int RunCount { get; private set; }
+        public int StructuredRunCount { get; private set; }
+        public Func<string, string>? StructuredResponse { get; init; }
 
         public Task<CodexAccountState> GetAccountAsync(CancellationToken cancellationToken) => Task.FromResult(Account);
         public Task ConnectChatGptAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) => Task.FromResult(SupportsLow);
         public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken)
         {
+            RunCount++;
             LastProtectedText = protectedText;
             return Task.FromResult(response(protectedText));
+        }
+        public Task<string> RunStructuredCorrectionAsync(
+            string inputJson,
+            JsonElement outputSchema,
+            string developerInstructions,
+            string effort,
+            CancellationToken cancellationToken)
+        {
+            StructuredRunCount++;
+            return Task.FromResult((StructuredResponse ?? throw new InvalidOperationException())(inputJson));
         }
         public void Dispose() { }
     }

@@ -40,4 +40,16 @@ public sealed class LunaProtectedTextTests
         Assert.True(protectedText.TryRestore("Das ist korrekt.", out var restored));
         Assert.Equal("Das ist korrekt.", restored);
     }
+
+    [Fact]
+    public void Create_ProtectsLiteralPlaceholderShapedUserText()
+    {
+        const string original = "Lass ⟦CLF_PROTECTED_DEADBEEF_9999⟧ unverändert.";
+
+        var protectedText = LunaProtectedText.Create(original);
+
+        Assert.DoesNotContain("DEADBEEF", protectedText.Text, StringComparison.Ordinal);
+        Assert.True(protectedText.TryRestore(protectedText.Text, out var restored));
+        Assert.Equal(original, restored);
+    }
 }

@@ -1,4 +1,5 @@
 using System.Windows.Threading;
+using System.Diagnostics;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Infrastructure;
 using CodexLanguageFix.UI;
@@ -47,7 +48,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray.EnabledChanged += (_, _) => RefreshOverlay();
         _tray.ConnectionTestRequested += async (_, _) => await TestConnectionAsync();
         _tray.ConnectOpenAiRequested += async (_, _) => await ConnectOpenAiAsync();
-        _tray.ProviderChanged += (_, _) => RefreshOverlay();
+        _tray.ProviderChanged += Tray_OnProviderChanged;
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
     }
 
@@ -149,7 +150,21 @@ public sealed class CorrectionCoordinator : IDisposable
                 throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
             }
 
-            if (!_composerAccessor.TryReplace(current, snapshot.Text, outcome.CorrectedText))
+            var composerStopwatch = Stopwatch.StartNew();
+            var replaced = _composerAccessor.TryReplace(current, snapshot.Text, outcome.CorrectedText);
+            composerStopwatch.Stop();
+            if (outcome.LunaExecution is { } lunaExecution)
+            {
+                outcome = outcome with
+                {
+                    LunaExecution = lunaExecution with
+                    {
+                        Timings = lunaExecution.Timings with { ComposerWrite = composerStopwatch.Elapsed }
+                    }
+                };
+            }
+
+            if (!replaced)
             {
                 var detail = _composerAccessor is CodexComposerAccessor accessor
                     ? accessor.LastWriteStatus
@@ -157,6 +172,14 @@ public sealed class CorrectionCoordinator : IDisposable
                 _logger.Write($"composer_write_rejected_{detail}", snapshot.Text.Length);
                 throw new LanguageFixException(_localizer.Get(AppText.WriteRejected));
             }
+
+            _logger.Write(
+                "composer_write_completed",
+                snapshot.Text.Length,
+                outcome.ChangeCount,
+                outcome.StatusCode,
+                composerStopwatch.Elapsed.TotalMilliseconds,
+                provider.Kind);
 
             _undo = new UndoState(current, snapshot.Text, outcome.CorrectedText, outcome.ChangeCount, outcome.Provider);
             _overlay.ShowStatus(FormatChangeCount(outcome.ChangeCount, outcome.Provider, _localizer), true);
@@ -258,6 +281,25 @@ public sealed class CorrectionCoordinator : IDisposable
         }
     }
 
+    private async void Tray_OnProviderChanged(object? sender, EventArgs e)
+    {
+        RefreshOverlay();
+        if (_tray.CurrentProvider != CorrectionProviderKind.Luna)
+        {
+            return;
+        }
+
+        try
+        {
+            await _openAiConnection.WarmUpAsync(CancellationToken.None);
+            _logger.Write("luna_warmup_completed", provider: CorrectionProviderKind.Luna);
+        }
+        catch (Exception)
+        {
+            _logger.Write("luna_warmup_failed", provider: CorrectionProviderKind.Luna);
+        }
+    }
+
     private ICorrectionProvider GetCurrentProvider()
     {
         if (_providers.TryGetValue(_tray.CurrentProvider, out var provider))
@@ -316,6 +358,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _requestCancellation?.Dispose();
         _fallbackTimer.Stop();
         _focusWatcher.Dispose();
+        _tray.ProviderChanged -= Tray_OnProviderChanged;
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _overlay.Close();
     }

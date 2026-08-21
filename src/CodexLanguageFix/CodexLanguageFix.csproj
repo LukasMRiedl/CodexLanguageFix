@@ -10,7 +10,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>CodexLanguageFix</AssemblyName>
     <RootNamespace>CodexLanguageFix</RootNamespace>
-    <Version>1.2.2</Version>
+    <Version>1.3.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

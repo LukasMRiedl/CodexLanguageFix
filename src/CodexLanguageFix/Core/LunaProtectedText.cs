@@ -23,7 +23,13 @@ public sealed class LunaProtectedText
     public static LunaProtectedText Create(string original)
     {
         ArgumentNullException.ThrowIfNull(original);
-        var spans = ProtectedSpanDetector.Detect(original);
+        var spans = ProtectedSpanDetector.Detect(original).ToList();
+        foreach (Match marker in AnyPlaceholder.Matches(original))
+        {
+            spans.Add(new TextSpan(marker.Index, marker.Length));
+        }
+
+        spans = MergeSpans(spans);
         if (spans.Count == 0)
         {
             return new LunaProtectedText(original, []);
@@ -95,6 +101,33 @@ public sealed class LunaProtectedText
         }
 
         return count;
+    }
+
+    private static List<TextSpan> MergeSpans(IEnumerable<TextSpan> spans)
+    {
+        var ordered = spans.OrderBy(span => span.Start).ThenByDescending(span => span.Length).ToArray();
+        if (ordered.Length == 0)
+        {
+            return [];
+        }
+
+        var merged = new List<TextSpan>();
+        var current = ordered[0];
+        foreach (var next in ordered.Skip(1))
+        {
+            if (next.Start <= current.End)
+            {
+                current = new TextSpan(current.Start, Math.Max(current.End, next.End) - current.Start);
+            }
+            else
+            {
+                merged.Add(current);
+                current = next;
+            }
+        }
+
+        merged.Add(current);
+        return merged;
     }
 
     private sealed record Entry(string Placeholder, string Original);

@@ -11,7 +11,10 @@ public sealed record CorrectionProviderResult(
     int ChangeCount,
     CorrectionProviderKind Provider,
     int? StatusCode,
-    TimeSpan Elapsed);
+    TimeSpan Elapsed)
+{
+    public LunaCorrectionExecution? LunaExecution { get; init; }
+}
 
 public sealed record CorrectionProviderHealth(CorrectionProviderKind Provider, TimeSpan Elapsed);
 

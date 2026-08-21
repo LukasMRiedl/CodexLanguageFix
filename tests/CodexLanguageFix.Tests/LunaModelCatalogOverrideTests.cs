@@ -8,7 +8,7 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"clf-catalog-{Guid.NewGuid():N}");
 
     [Fact]
-    public void TryCreate_AddsNoneOnlyToPrivateCopy()
+    public void TryCreate_AddsSupportedEffortsOnlyToPrivateCopy()
     {
         var codexHome = Path.Combine(_root, ".codex");
         var runtime = Path.Combine(_root, "runtime");
@@ -25,14 +25,14 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
         using var document = JsonDocument.Parse(File.ReadAllText(output!));
         var efforts = document.RootElement.GetProperty("models")[0].GetProperty("supported_reasoning_levels");
         Assert.Equal(
-            ["none", "max"],
+            ["none", "low", "medium", "max"],
             efforts.EnumerateArray().Select(item => item.GetProperty("effort").GetString()));
         Assert.Equal("max", document.RootElement.GetProperty("models")[0].GetProperty("default_reasoning_level").GetString());
         Assert.Equal("list", document.RootElement.GetProperty("models")[0].GetProperty("visibility").GetString());
     }
 
     [Fact]
-    public void TryCreate_DoesNotDuplicateExistingNone()
+    public void TryCreate_DoesNotDuplicateExistingSupportedEfforts()
     {
         var codexHome = Path.Combine(_root, ".codex");
         var runtime = Path.Combine(_root, "runtime");
@@ -48,6 +48,8 @@ public sealed class LunaModelCatalogOverrideTests : IDisposable
         using var document = JsonDocument.Parse(File.ReadAllText(output!));
         var efforts = document.RootElement.GetProperty("models")[0].GetProperty("supported_reasoning_levels");
         Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "none");
+        Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "low");
+        Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "medium");
         Assert.Single(efforts.EnumerateArray(), item => item.GetProperty("effort").GetString() == "max");
     }
 

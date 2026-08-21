@@ -3,6 +3,7 @@ obj/
 .vs/
 .vscode/
 TestResults/
+benchmark-results/
 artifacts/
 dist/
 publish/

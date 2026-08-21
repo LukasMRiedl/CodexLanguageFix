@@ -1,5 +1,6 @@
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
+using System.Diagnostics;
 
 namespace CodexLanguageFix.Infrastructure;
 
@@ -11,15 +12,17 @@ public sealed class LanguageToolCorrectionProvider(
 
     public async Task<CorrectionProviderResult> CorrectAsync(string text, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var annotated = engine.Annotate(text);
         var check = await client.CheckAsync(annotated, cancellationToken).ConfigureAwait(false);
         var outcome = engine.Apply(text, annotated, check.Matches);
+        stopwatch.Stop();
         return new CorrectionProviderResult(
             outcome.CorrectedText,
             outcome.Corrections.Count,
             Kind,
             check.StatusCode,
-            check.Elapsed);
+            stopwatch.Elapsed);
     }
 
     public async Task<CorrectionProviderHealth> TestAsync(CancellationToken cancellationToken)

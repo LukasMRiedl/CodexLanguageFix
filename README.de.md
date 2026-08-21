@@ -2,7 +2,7 @@
 
 [English](README.md) · **Deutsch**
 
-Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna im Fast Mode ohne Denkmodus über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen API-Schlüssel oder einen eigenen Server.
+Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen OpenAI-API-Schlüssel, zusätzliche API-Abrechnung oder einen eigenen Server.
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
@@ -10,7 +10,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 - Ein unaufdringlicher `Aa`-Knopf erscheint dynamisch in der aktuellen Eingabeleiste.
 - Ein Klick prüft Rechtschreibung, Grammatik, Zeichensetzung und Stil.
-- LanguageTool bleibt der standardmäßige und schnellste Anbieter. OpenAI Luna lässt sich im Infobereich auswählen und wird ausschließlich als `gpt-5.6-luna` ohne Denkmodus und mit Fast Mode verwendet.
+- LanguageTool bleibt der Standardanbieter. OpenAI Luna lässt sich im Infobereich auswählen. Die Produktion verwendet das qualifizierte Profil `baseline / none / full-v1` von `gpt-5.6-luna` mit Fast Mode; experimentelle Profile werden niemals automatisch aktiviert.
 - Luna nutzt den offiziellen Codex App Server und dessen verwalteten ChatGPT-OAuth-Ablauf. Die App liest oder speichert niemals OAuth-Tokens.
 - Deutsch und Englisch werden automatisch erkannt; bevorzugt werden `de-DE` und `en-US`.
 - Die gesamte Oberfläche ist auf Deutsch und Englisch verfügbar. Standardmäßig folgt sie der Windows-Anzeigesprache und lässt sich jederzeit über das Menü im Infobereich umschalten.
@@ -38,9 +38,9 @@ Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb be
 
 ## Datenschutz
 
-Erst nach einem Klick sendet die App den aktuellen Prompt an den ausgewählten Anbieter. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna-Anfragen verwenden einen ephemeren Codex-App-Server-Thread mit `gpt-5.6-luna`, ohne Denkmodus, mit Fast Mode, einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Jede beobachtete Werkzeugaktion verwirft die gesamte Antwort. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
+Erst nach einem Klick sendet die App den aktuellen Prompt an den ausgewählten Anbieter. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna verwendet ChatGPT-OAuth über den offiziellen Codex App Server; einen API-Schlüssel-Pfad gibt es nicht. Die Produktion nutzt das qualifizierte Profil `baseline / none / full-v1` in einem ephemeren `gpt-5.6-luna`-Thread mit Fast Mode, einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Der App Server und ein leerer Einmal-Thread dürfen ohne Composer-Inhalt vorbereitet werden; während des Tippens startet weder eine Korrektur noch ein lokaler Vorabentwurf. Segment- und Span-Protokolle sowie `low` und `medium` bleiben deaktiviert. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
 
-Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden niemals protokolliert. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt.
+Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden niemals protokolliert. Bis zu 64 bereits validierte Luna-Ergebnisse werden ausschließlich im Arbeitsspeicher zwischengespeichert und beim Beenden verworfen. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt.
 
 Weitere Einzelheiten stehen in [PRIVACY.md](PRIVACY.md).
 
@@ -60,6 +60,14 @@ dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj `
   --self-contained true `
   -p:PublishSingleFile=true
 ```
+
+Der externe Qualitäts- und Geschwindigkeitsbenchmark ist bewusst opt-in und benötigt die Codex-ChatGPT-OAuth-Sitzung. Seine feste, deterministische Suche in vier Stufen prüft alle 15 Prompt-/Denkstufenkombinationen, wählt je Denkstufe einen Prompt, vergleicht alle sechs Ausgabeprotokolle an Langtexten und prüft den Sieger direkt gegen `baseline / none / full-v1`. Die Suchstufen verwenden zwei parallele Luna-Anfragen; der abschließende zweisprachige LanguageTool-Vergleich läuft ohne konkurrierende Luna-Last und hält LanguageTools öffentliche Grenze ein. Es gibt keinen globalen Zeitabbruch: Jede Stufe wird vollständig ausgeführt und schreibt sofort einen dauerhaften Schema-v3-Bericht ohne Rohtexte. Bei den beobachteten rund sieben Sekunden je Luna-Korrektur benötigte der qualifizierte Lauf für alle 144 geplanten Messungen 15 Minuten und 44 Sekunden.
+
+```powershell
+.\scripts\run-full-luna-qualification.ps1
+```
+
+Die Qualifikation vom 20. August 2026 wählte `baseline / none / full-v1`. Das Profil bestand sämtliche Sicherheitsgatter und erreichte im finalen gepaarten Vergleich einen F0,5-Wert von 0,75 gegenüber 0,25 für LanguageTool. Luna war nicht schneller: Der warme p50-Wert betrug 7,97 Sekunden gegenüber 0,72 Sekunden für LanguageTool, also etwa das 11,1-Fache. Segment- und Span-Protokolle wurden deshalb nicht aktiviert. Ein zukünftiges Profil wird nur dann als schneller bezeichnet, wenn beide gepaarten p50-/p95-Latenzgatter bestehen; andernfalls entscheidet die maximale sichere Qualität über das Luna-Profil.
 
 Die selbstenthaltende Einzeldatei liegt anschließend unter:
 

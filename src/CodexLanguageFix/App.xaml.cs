@@ -59,6 +59,10 @@ public partial class App : System.Windows.Application
 
         _languageToolClient = new LanguageToolClient(localizer: localizer);
         _codexAppServerClient = new CodexAppServerClient(settingsService.ApplicationDirectory, localizer);
+        if (settings.CorrectionProvider == CorrectionProviderKind.Luna)
+        {
+            _ = WarmUpLunaAsync(_codexAppServerClient, logger);
+        }
         var correctionEngine = new CorrectionEngine();
         var languageToolProvider = new LanguageToolCorrectionProvider(_languageToolClient, correctionEngine);
         var lunaProvider = new LunaCorrectionProvider(_codexAppServerClient, localizer);
@@ -97,5 +101,18 @@ public partial class App : System.Windows.Application
             _singleInstanceMutex.Dispose();
         }
         base.OnExit(e);
+    }
+
+    private static async Task WarmUpLunaAsync(CodexAppServerClient client, DiagnosticLogger logger)
+    {
+        try
+        {
+            await client.WarmUpAsync(CancellationToken.None).ConfigureAwait(false);
+            logger.Write("luna_warmup_completed", provider: CorrectionProviderKind.Luna);
+        }
+        catch (Exception)
+        {
+            logger.Write("luna_warmup_failed", provider: CorrectionProviderKind.Luna);
+        }
     }
 }
