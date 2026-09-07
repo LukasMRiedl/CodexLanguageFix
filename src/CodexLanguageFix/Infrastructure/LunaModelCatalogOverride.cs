@@ -15,12 +15,14 @@ internal static partial class LunaModelCatalogOverride
         {
             codexHome ??= ResolveCodexHome();
             var configPath = Path.Combine(codexHome, "config.toml");
-            if (!File.Exists(configPath))
+            var config = File.Exists(configPath) ? File.ReadAllText(configPath) : string.Empty;
+            if (!CatalogSettingRegex().IsMatch(config))
             {
-                return null;
+                var existingPath = Path.Combine(runtimeDirectory, OutputFileName);
+                return IsUsablePrivateCatalog(existingPath) ? existingPath : null;
             }
 
-            var sourcePath = ReadCatalogPath(File.ReadAllText(configPath), codexHome);
+            var sourcePath = ReadCatalogPath(config, codexHome);
             if (sourcePath is null || !File.Exists(sourcePath))
             {
                 return null;
@@ -96,6 +98,51 @@ internal static partial class LunaModelCatalogOverride
         return Path.GetFullPath(Path.IsPathRooted(value) ? value : Path.Combine(codexHome, value));
     }
 
+    private static bool IsUsablePrivateCatalog(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("models", out var models)
+            || models.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var supportsLuna = false;
+        foreach (var model in models.EnumerateArray())
+        {
+            if (model.ValueKind != JsonValueKind.Object
+                || !model.TryGetProperty("slug", out var slug) || slug.ValueKind != JsonValueKind.String
+                || !model.TryGetProperty("base_instructions", out var instructions) || instructions.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            if (slug.GetString() != CodexAppServerClient.LunaModel)
+            {
+                continue;
+            }
+
+            supportsLuna = model.TryGetProperty("supported_reasoning_levels", out var efforts)
+                && efforts.ValueKind == JsonValueKind.Array
+                && efforts.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Object
+                    && item.TryGetProperty("effort", out var effort)
+                    && effort.ValueKind == JsonValueKind.String && effort.GetString() == CodexAppServerClient.LunaEffort)
+                && model.TryGetProperty("service_tiers", out var tiers)
+                && tiers.ValueKind == JsonValueKind.Array
+                && tiers.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Object
+                    && item.TryGetProperty("id", out var id)
+                    && id.ValueKind == JsonValueKind.String && id.GetString() == CodexAppServerClient.LunaServiceTier);
+        }
+
+        return supportsLuna;
+    }
+
     private static string ResolveCodexHome()
     {
         var configured = Environment.GetEnvironmentVariable("CODEX_HOME");
@@ -120,4 +167,7 @@ internal static partial class LunaModelCatalogOverride
         "(?m)^\\s*model_catalog_json\\s*=\\s*(?:'(?<single>[^']+)'|\\\"(?<double>(?:\\\\.|[^\\\"])*)\\\")\\s*(?:#.*)?$",
         RegexOptions.CultureInvariant)]
     private static partial Regex CatalogPathRegex();
+
+    [GeneratedRegex("(?m)^\\s*model_catalog_json\\s*=", RegexOptions.CultureInvariant)]
+    private static partial Regex CatalogSettingRegex();
 }

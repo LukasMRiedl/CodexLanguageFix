@@ -3,16 +3,17 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Text;
 using CodexLanguageFix.Contracts;
+using CodexLanguageFix.Core;
 
 namespace CodexLanguageFix.Windows;
 
 public sealed class CodexComposerAccessor : IComposerAccessor
 {
-    private const int AnimatedStepDelayMilliseconds = 4;
     public string LastWriteStatus { get; private set; } = "not_attempted";
+    public ComposerWriteResult? LastWriteResult { get; private set; }
     internal static int NativeInputSize => UnicodeInput.StructSize;
-    internal static int AnimatedBatchSize(int textLength) => UnicodeInput.CalculateAnimatedBatchSize(textLength);
 
     public ComposerSnapshot? TryCaptureFocusedComposer()
     {
@@ -23,10 +24,14 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             {
                 var editable = FindEditableAncestor(focused);
                 var focusedHost = editable is null ? null : TryGetComposerHost(editable);
-                if (editable is not null && focusedHost is not null && !IsPasswordField(editable))
+                if (editable is not null && focusedHost is not null && !IsPasswordField(editable)
+                    && IsComposerShapeForHost(editable, focusedHost.Value))
                 {
                     return CreateSnapshot(editable, focusedHost.Value);
                 }
+                // A focused search, rename field or terminal must not redirect to a different composer.
+                if (editable is not null)
+                    return null;
             }
 
             return TryCaptureActiveWindowComposer(focused);
@@ -72,8 +77,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         var focusableElements = root.FindAll(
             TreeScope.Descendants,
             new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true));
-        AutomationElement? best = null;
-        var bestBottom = double.MinValue;
+        AutomationElement? candidate = null;
         foreach (AutomationElement element in focusableElements)
         {
             if (!IsComposerShapeForHost(element, host.Value)
@@ -90,14 +94,15 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 continue;
             }
 
-            if (bounds.Bottom > bestBottom)
+            if (candidate is not null)
             {
-                best = element;
-                bestBottom = bounds.Bottom;
+                return null;
             }
+
+            candidate = element;
         }
 
-        return best is null ? null : CreateSnapshot(best, host.Value);
+        return candidate is null ? null : CreateSnapshot(candidate, host.Value);
     }
 
     private static AutomationElement? FindDocumentRoot(AutomationElement? element)
@@ -125,7 +130,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         var classes = className ?? string.Empty;
         return host switch
         {
-            ComposerHost.Codex => type == ControlType.Edit
+            ComposerHost.Codex => (type == ControlType.Edit || type == ControlType.Group || type == ControlType.Document)
                 && classes.Split(' ', StringSplitOptions.RemoveEmptyEntries)
                     .Any(token => string.Equals(token, "ProseMirror", StringComparison.OrdinalIgnoreCase)),
             ComposerHost.Antigravity => type == ControlType.ComboBox
@@ -151,12 +156,14 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
         try
         {
-            if (!IsSameRuntimeId(element.GetRuntimeId(), snapshot.RuntimeId))
+            if (!IsSameRuntimeId(element.GetRuntimeId(), snapshot.RuntimeId)
+                || TryGetComposerHost(element) != snapshot.Host)
             {
                 return null;
             }
 
-            return CreateSnapshot(element, snapshot.Host);
+            var refreshed = CreateSnapshot(element, snapshot.Host);
+            return snapshot.SameEditor(refreshed) ? refreshed : null;
         }
         catch (ElementNotAvailableException)
         {
@@ -182,10 +189,10 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(expectedText);
         ArgumentNullException.ThrowIfNull(replacement);
+        LastWriteResult = new ComposerWriteResult(ComposerWriteState.Unchanged, expectedText, expectedText, 0, "started");
         if (snapshot.NativeElement is not AutomationElement element)
         {
-            LastWriteStatus = "invalid_native_element";
-            return false;
+            return Failed("invalid_native_element");
         }
 
         try
@@ -193,55 +200,41 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             var current = TryRefresh(snapshot);
             if (current is null || !string.Equals(current.Text, expectedText, StringComparison.Ordinal))
             {
-                LastWriteStatus = current is null ? "refresh_unavailable" : "expected_text_mismatch";
-                return false;
+                return Failed(current is null ? "refresh_unavailable" : "expected_text_mismatch");
             }
 
-            if (EnsureComposerFocus(element) && UnicodeInput.ReplaceFocusedText(replacement))
+            var plan = ComposerEditPlan.Create(expectedText, replacement);
+            if (plan is null)
             {
-                var unicodeObserved = WaitForText(element, replacement);
-                LastWriteStatus = unicodeObserved ? "ok_unicode_animated" : "unicode_not_observed";
-                return unicodeObserved;
+                return Failed("unsafe_edit_plan");
             }
 
-            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
+            if (!EnsureComposerFocus(element, snapshot.HostWindow))
             {
-                var valuePattern = (ValuePattern)valuePatternObject;
-                if (!valuePattern.Current.IsReadOnly)
-                {
-                    ReplaceWithValueAnimation(valuePattern, replacement);
-                    var observed = WaitForText(element, replacement);
-                    LastWriteStatus = observed ? "ok_value_animated_fallback" : "value_not_observed";
-                    return observed;
-                }
+                return Failed("focus_changed");
             }
 
-            LastWriteStatus = "animated_write_unavailable";
-            return false;
+            var target = new NativeEditTarget(snapshot, element);
+            if (snapshot.ReadMethod == ComposerReadMethod.ValuePattern)
+            {
+                plan = new ComposerEditPlan(expectedText, replacement,
+                    expectedText == replacement ? [] : [new ComposerTextEdit(0, expectedText, replacement)]);
+            }
+
+            LastWriteResult = ComposerWriteTransaction.Apply(plan, target);
+            LastWriteStatus = LastWriteResult.Status;
+            return LastWriteResult.State == ComposerWriteState.Applied;
         }
-        catch (ElementNotAvailableException)
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException
+            or Win32Exception or ArgumentException or COMException)
         {
-            LastWriteStatus = "element_unavailable_exception";
-            return false;
+            return Failed("element_unavailable_or_invalid");
         }
-        catch (InvalidOperationException)
+
+        bool Failed(string status)
         {
-            LastWriteStatus = "invalid_operation_exception";
-            return false;
-        }
-        catch (Win32Exception)
-        {
-            LastWriteStatus = "win32_exception";
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            LastWriteStatus = "argument_exception";
-            return false;
-        }
-        catch (COMException)
-        {
-            LastWriteStatus = "com_exception";
+            LastWriteStatus = status;
+            LastWriteResult = new ComposerWriteResult(ComposerWriteState.Unchanged, expectedText, null, 0, status);
             return false;
         }
     }
@@ -283,7 +276,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     internal static bool IsSupportedComposerShape(ControlType type, string? className, string? automationId)
     {
-        var isProseMirror = type == ControlType.Group
+        var isProseMirror = (type == ControlType.Group || type == ControlType.Edit || type == ControlType.Document)
             && (className ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
                 .Any(token => string.Equals(token, "ProseMirror", StringComparison.OrdinalIgnoreCase));
         var isRootWebArea = type == ControlType.Document
@@ -292,7 +285,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             && (className ?? string.Empty).Contains("cursor-text", StringComparison.OrdinalIgnoreCase)
             && (className ?? string.Empty).Contains("overflow-y-auto", StringComparison.OrdinalIgnoreCase);
         return !isRootWebArea
-            && (type == ControlType.Edit || type == ControlType.Document || isProseMirror || isAntigravityComposer);
+            && (isProseMirror || isAntigravityComposer);
     }
 
     private static bool IsPasswordField(AutomationElement element)
@@ -349,14 +342,16 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private static ComposerSnapshot? CreateSnapshot(AutomationElement element, ComposerHost host)
     {
-        var text = ReadText(element);
+        var text = ReadText(element, out var readMethod);
         if (text is null)
         {
             return null;
         }
 
         var editorBounds = element.Current.BoundingRectangle;
-        if (editorBounds.IsEmpty || editorBounds.Width < 40 || editorBounds.Height < 20 || double.IsNaN(editorBounds.X) || double.IsInfinity(editorBounds.X))
+        if (element.Current.IsOffscreen || !element.Current.IsEnabled
+            || editorBounds.IsEmpty || editorBounds.Width < 40 || editorBounds.Height < 20
+            || double.IsNaN(editorBounds.X) || double.IsInfinity(editorBounds.X))
         {
             return null;
         }
@@ -370,7 +365,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             surfaceBounds,
             element.Current.ProcessId,
             toolbar.RightControlBounds,
-            host);
+            host,
+            FindHostWindow(element),
+            editorBounds,
+            toolbar.OccupiedBounds,
+            readMethod);
     }
 
     private static Rect FindComposerSurfaceBounds(AutomationElement composer, Rect editorBounds)
@@ -391,7 +390,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             }
 
             var candidate = current.Current.BoundingRectangle;
-            if (IsComposerSurfaceCandidate(editorBounds, candidate))
+            if (IsComposerSurfaceCandidate(editorBounds, candidate) && HasAssociatedControls(current, candidate, editorBounds))
             {
                 return candidate;
             }
@@ -400,10 +399,25 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return editorBounds;
     }
 
+    private static bool HasAssociatedControls(AutomationElement surface, Rect bounds, Rect editor)
+    {
+        var buttons = surface.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+        foreach (AutomationElement button in buttons)
+        {
+            var controlBounds = button.Current.BoundingRectangle;
+            if (!button.Current.IsOffscreen && !controlBounds.IsEmpty
+                && bounds.Contains(controlBounds) && !editor.IntersectsWith(controlBounds))
+                return true;
+        }
+        return false;
+    }
+
     internal static bool IsComposerSurfaceCandidate(Rect editorBounds, Rect candidate) =>
         !editorBounds.IsEmpty
         && !candidate.IsEmpty
-        && candidate.Width >= editorBounds.Width + 80
+        && candidate.Width >= editorBounds.Width
+        && (candidate.Width >= editorBounds.Width + 24 || candidate.Height >= editorBounds.Height + 24)
         && candidate.Height >= editorBounds.Height
         && candidate.Height <= Math.Max(240, editorBounds.Height + 160)
         && candidate.Left <= editorBounds.Left
@@ -419,7 +433,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         try
         {
             var searchRoot = composer;
-            for (var depth = 0; depth < 12; depth++)
+            for (var depth = 0; depth < 6 && searchRoot.Current.BoundingRectangle != composerBounds; depth++)
             {
                 var parent = TreeWalker.ControlViewWalker.GetParent(searchRoot);
                 if (parent is null)
@@ -427,25 +441,40 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     break;
                 }
 
-                searchRoot = parent;
-                if (searchRoot.Current.ControlType == ControlType.Document
-                    && string.Equals(searchRoot.Current.AutomationId, "RootWebArea", StringComparison.OrdinalIgnoreCase))
+                if (parent.Current.ControlType == ControlType.Document)
                 {
                     break;
                 }
+
+                searchRoot = parent;
             }
 
-            var buttons = searchRoot.FindAll(
+            if (searchRoot.Current.BoundingRectangle != composerBounds)
+            {
+                return new ToolbarContext(null, [composer.Current.BoundingRectangle]);
+            }
+
+            var controls = searchRoot.FindAll(
                 TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+                new OrCondition(
+                    new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)));
             var minimumLeft = composerBounds.Left + composerBounds.Width * (
                 host == ComposerHost.Codex ? 0.35 : 0.55);
             var maximumTopDistance = Math.Max(48, composerBounds.Height);
             Rect? best = null;
-            foreach (AutomationElement button in buttons)
+            var occupied = new List<Rect> { composer.Current.BoundingRectangle };
+            foreach (AutomationElement button in controls)
             {
                 var bounds = button.Current.BoundingRectangle;
+                if (!bounds.IsEmpty && !button.Current.IsOffscreen && bounds.IntersectsWith(composerBounds))
+                {
+                    occupied.Add(bounds);
+                }
+
                 if (bounds.IsEmpty
+                    || button.Current.ControlType != ControlType.Button
+                    || button.Current.IsOffscreen
                     || bounds.Width < 24
                     || bounds.Left < minimumLeft
                     || bounds.Left >= composerBounds.Right
@@ -463,7 +492,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 }
             }
 
-            return new ToolbarContext(best);
+            return new ToolbarContext(best, occupied);
         }
         catch (ElementNotAvailableException)
         {
@@ -497,21 +526,46 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             ? candidate.Left > current.Value.Left
             : candidate.Left < current.Value.Left);
 
-    private readonly record struct ToolbarContext(Rect? RightControlBounds);
+    private readonly record struct ToolbarContext(Rect? RightControlBounds, IReadOnlyList<Rect>? OccupiedBounds);
 
-    private static string? ReadText(AutomationElement element)
+    private static string? ReadText(AutomationElement element) => ReadText(element, out _);
+
+    private static string? ReadText(AutomationElement element, out ComposerReadMethod readMethod)
     {
-        if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
+        var isStructured = IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Codex)
+            || IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Antigravity);
+        if (!isStructured && element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
         {
+            readMethod = ComposerReadMethod.ValuePattern;
             return ((ValuePattern)valuePatternObject).Current.Value;
         }
 
         if (element.TryGetCurrentPattern(TextPattern.Pattern, out var textPatternObject))
         {
+            readMethod = ComposerReadMethod.TextPattern;
             return ((TextPattern)textPatternObject).DocumentRange.GetText(-1);
         }
 
+        readMethod = ComposerReadMethod.Unknown;
         return null;
+    }
+
+    private static nint FindHostWindow(AutomationElement element)
+    {
+        var processId = element.Current.ProcessId;
+        nint handle = 0;
+        var current = element;
+        for (var depth = 0; depth < 30 && current is not null && current.Current.ProcessId == processId; depth++)
+        {
+            if (current.Current.NativeWindowHandle != 0)
+            {
+                handle = current.Current.NativeWindowHandle;
+            }
+
+            current = TreeWalker.ControlViewWalker.GetParent(current);
+        }
+
+        return handle;
     }
 
     private static bool IsFocusedElementOrAncestor(AutomationElement expected)
@@ -530,7 +584,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return false;
     }
 
-    private static bool EnsureComposerFocus(AutomationElement element)
+    private static bool EnsureComposerFocus(AutomationElement element, nint hostWindow)
     {
         if (IsFocusedElementOrAncestor(element))
         {
@@ -544,8 +598,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         }
 
         _ = GetWindowThreadProcessId(foreground, out var foregroundProcessId);
-        if (foregroundProcessId != element.Current.ProcessId
-            && foregroundProcessId != Environment.ProcessId)
+        if (foreground != hostWindow && foregroundProcessId != Environment.ProcessId)
         {
             return false;
         }
@@ -569,22 +622,136 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return false;
     }
 
-    private static void ReplaceWithValueAnimation(ValuePattern valuePattern, string text)
+    private sealed class NativeEditTarget(ComposerSnapshot snapshot, AutomationElement element)
+        : IComposerEditTarget
     {
-        if (text.Length == 0)
+        public bool IsCurrentEditor => snapshot.HostWindow != 0
+            && GetForegroundWindow() == snapshot.HostWindow
+            && IsFocusedElementOrAncestor(element)
+            && element.Current.ProcessId == snapshot.ProcessId
+            && !element.Current.IsOffscreen && element.Current.IsEnabled
+            && IsSameRuntimeId(element.GetRuntimeId(), snapshot.RuntimeId);
+
+        public string? Read() => ReadText(element);
+
+        public bool CanReplace(int start, string expected)
         {
-            valuePattern.SetValue(string.Empty);
-            return;
+            if (snapshot.ReadMethod == ComposerReadMethod.ValuePattern)
+            {
+                return start == 0 && Read() == expected
+                    && element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)
+                    && !((ValuePattern)pattern).Current.IsReadOnly;
+            }
+
+            return CreateVerifiedRange(start, expected) is not null;
         }
 
-        var batchSize = AnimatedBatchSize(text.Length);
-        for (var length = batchSize; length < text.Length; length += batchSize)
+        public bool Replace(int start, string expected, string replacement)
         {
-            valuePattern.SetValue(text[..length]);
-            Thread.Sleep(AnimatedStepDelayMilliseconds);
+            if (!IsCurrentEditor)
+            {
+                return false;
+            }
+
+            var before = Read();
+            if (before is null || start < 0 || start > before.Length || expected.Length > before.Length - start
+                || !before.AsSpan(start, expected.Length).SequenceEqual(expected))
+            {
+                return false;
+            }
+
+            var after = before.Remove(start, expected.Length).Insert(start, replacement);
+            if (snapshot.ReadMethod == ComposerReadMethod.ValuePattern)
+            {
+                if (!CanReplace(start, expected) || !IsCurrentEditor || Read() != before)
+                {
+                    return false;
+                }
+
+                ((ValuePattern)element.GetCurrentPattern(ValuePattern.Pattern)).SetValue(replacement);
+            }
+            else
+            {
+                var range = CreateVerifiedRange(start, expected);
+                if (range is null || !IsCurrentEditor || Read() != before)
+                {
+                    return false;
+                }
+
+                range.Select();
+                var textPattern = (TextPattern)element.GetCurrentPattern(TextPattern.Pattern);
+                var selection = textPattern.GetSelection();
+                if (selection.Length != 1 || selection[0].CompareEndpoints(TextPatternRangeEndpoint.Start,
+                        range, TextPatternRangeEndpoint.Start) != 0
+                    || selection[0].CompareEndpoints(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.End) != 0
+                    || selection[0].GetText(-1) != expected || !IsCurrentEditor || Read() != before)
+                {
+                    return false;
+                }
+
+                if (!UnicodeInput.ReplaceSelection(replacement))
+                {
+                    return false;
+                }
+            }
+
+            return WaitForText(element, after);
         }
 
-        valuePattern.SetValue(text);
+        private TextPatternRange? CreateVerifiedRange(int start, string expected)
+        {
+            if (!element.TryGetCurrentPattern(TextPattern.Pattern, out var pattern))
+            {
+                return null;
+            }
+
+            var document = ((TextPattern)pattern).DocumentRange;
+            var full = document.GetText(-1);
+            if (start < 0 || start > full.Length || expected.Length > full.Length - start
+                || !full.AsSpan(start, expected.Length).SequenceEqual(expected))
+            {
+                return null;
+            }
+
+            var before = PrefixRange(document, full, start);
+            var through = PrefixRange(document, full, start + expected.Length);
+            if (before is null || through is null)
+            {
+                return null;
+            }
+
+            through.MoveEndpointByRange(TextPatternRangeEndpoint.Start, before, TextPatternRangeEndpoint.End);
+            return through.GetText(-1) == expected ? through : null;
+        }
+
+        private static TextPatternRange? PrefixRange(TextPatternRange document, string full, int utf16Length)
+        {
+            var low = 0;
+            var high = utf16Length;
+            while (low <= high)
+            {
+                var units = low + (high - low) / 2;
+                var prefix = document.Clone();
+                prefix.MoveEndpointByRange(TextPatternRangeEndpoint.End, document, TextPatternRangeEndpoint.Start);
+                _ = prefix.MoveEndpointByUnit(TextPatternRangeEndpoint.End, TextUnit.Character, units);
+                var text = prefix.GetText(-1);
+                if (text.Length == utf16Length)
+                {
+                    return text.AsSpan().SequenceEqual(full.AsSpan(0, utf16Length)) ? prefix : null;
+                }
+
+                if (text.Length < utf16Length)
+                {
+                    low = units + 1;
+                }
+                else
+                {
+                    high = units - 1;
+                }
+            }
+
+            return null;
+        }
     }
 
     private static bool IsSameRuntimeId(IReadOnlyList<int> left, IReadOnlyList<int> right) =>
@@ -598,66 +765,33 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private static class UnicodeInput
     {
-        private const ushort VirtualKeyControl = 0x11;
-        private const ushort VirtualKeyA = 0x41;
+        private const ushort VirtualKeyBack = 0x08;
         private const uint KeyEventKeyUp = 0x0002;
         private const uint KeyEventUnicode = 0x0004;
         private const int InputKeyboard = 1;
-        private const int TargetAnimationSteps = 12;
-        private const int MaximumBatchSize = 512;
         public static int StructSize => Marshal.SizeOf<INPUT>();
 
-        public static bool ReplaceFocusedText(string text)
+        public static bool ReplaceSelection(string text)
         {
-            var selectAll = new[]
-            {
-                Key(VirtualKeyControl, 0),
-                Key(VirtualKeyA, 0),
-                Key(VirtualKeyA, KeyEventKeyUp),
-                Key(VirtualKeyControl, KeyEventKeyUp)
-            };
-            if (SendInput((uint)selectAll.Length, selectAll, Marshal.SizeOf<INPUT>()) != selectAll.Length)
+            if (text.Any(character => char.IsControl(character) || character is '\ufffc' or '\u2028' or '\u2029'))
             {
                 return false;
             }
 
-            var batchSize = CalculateAnimatedBatchSize(text.Length);
-            var chunks = text.Chunk(batchSize).ToArray();
-            for (var chunkIndex = 0; chunkIndex < chunks.Length; chunkIndex++)
+            if (text.Length == 0)
             {
-                var chunk = chunks[chunkIndex];
-                var inputs = new INPUT[chunk.Length * 2];
-                for (var index = 0; index < chunk.Length; index++)
-                {
-                    inputs[index * 2] = UnicodeKey(chunk[index], 0);
-                    inputs[index * 2 + 1] = UnicodeKey(chunk[index], KeyEventKeyUp);
-                }
-
-                if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) != inputs.Length)
-                {
-                    return false;
-                }
-
-                if (chunkIndex + 1 < chunks.Length)
-                {
-                    Thread.Sleep(AnimatedStepDelayMilliseconds);
-                }
+                var deletion = new[] { Key(VirtualKeyBack, 0), Key(VirtualKeyBack, KeyEventKeyUp) };
+                return SendInput((uint)deletion.Length, deletion, StructSize) == deletion.Length;
             }
 
-            return true;
-        }
-
-        internal static int CalculateAnimatedBatchSize(int textLength)
-        {
-            if (textLength <= 0)
+            var inputs = new INPUT[text.Length * 2];
+            for (var index = 0; index < text.Length; index++)
             {
-                return 1;
+                inputs[index * 2] = UnicodeKey(text[index], 0);
+                inputs[index * 2 + 1] = UnicodeKey(text[index], KeyEventKeyUp);
             }
 
-            return Math.Clamp(
-                (int)Math.Ceiling(textLength / (double)TargetAnimationSteps),
-                1,
-                MaximumBatchSize);
+            return SendInput((uint)inputs.Length, inputs, StructSize) == inputs.Length;
         }
 
         private static INPUT Key(ushort virtualKey, uint flags) => new()

@@ -46,7 +46,7 @@ public sealed class CodexComposerShapeTests
         Assert.False(CodexComposerAccessor.IsComposerSurfaceCandidate(
             editor,
             new System.Windows.Rect(240, 212, 2400, 1460)));
-        Assert.False(CodexComposerAccessor.IsComposerSurfaceCandidate(
+        Assert.True(CodexComposerAccessor.IsComposerSurfaceCandidate(
             editor,
             new System.Windows.Rect(1090, 849, 939, 80)));
     }
@@ -79,16 +79,6 @@ public sealed class CodexComposerShapeTests
             ComposerHost.Antigravity));
     }
 
-    [Theory]
-    [InlineData(1, 1)]
-    [InlineData(12, 1)]
-    [InlineData(120, 10)]
-    [InlineData(20_000, 512)]
-    public void AnimatedBatchSize_AlwaysUsesMultipleFastSteps(int textLength, int expected)
-    {
-        Assert.Equal(expected, CodexComposerAccessor.AnimatedBatchSize(textLength));
-    }
-
     [Fact]
     public void ProseMirrorGroup_IsRecognizedAsCodexComposer()
     {
@@ -108,9 +98,9 @@ public sealed class CodexComposerShapeTests
     }
 
     [Fact]
-    public void TextBox_RemainsSupportedForNativeFallbacks()
+    public void ComposerAutomationIdAloneDoesNotQualifyUnverifiedTextBox()
     {
-        Assert.True(CodexComposerAccessor.IsSupportedComposerShape(
+        Assert.False(CodexComposerAccessor.IsSupportedComposerShape(
             ControlType.Edit,
             "TextBox",
             "Composer"));

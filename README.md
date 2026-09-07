@@ -6,6 +6,8 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
+The current source contains the **1.3.1 release candidate** for format-safe insertion and overlay placement. Automated format checks passed for both providers; real-host UI acceptance is still open. See [repair verification](docs/format-repair-2026-09-08.md). It is not yet a fully accepted stable release.
+
 ## Features
 
 - A subtle `Aa` button dynamically appears inside the active prompt bar.
@@ -17,8 +19,10 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 - Markdown code blocks, inline code, URLs, email addresses, file paths, command-line options, and common code identifiers remain unchanged.
 - The clipboard is never read or modified.
 - Prompt text is transmitted only after an explicit click.
-- Corrections can be undone immediately.
-- Different window widths, DPI scaling levels, and Chat, Work, and Plan layouts are detected dynamically.
+- Paragraphs, blank lines, indentation, list markers, checkboxes and Markdown line breaks are validated before insertion. Unsafe Luna responses are rejected; unsafe LanguageTool edits are skipped.
+- Corrections use verified text ranges, without a typing animation or whole-editor retyping. Undo is restricted to the original editor and exact corrected text.
+- The compact button is placed only in a verified free area belonging to a uniquely identified composer. It hides when identification or placement is ambiguous. Positioning uses the target monitor's DPI, including negative monitor coordinates.
+- Requests are cancelled when the source editor or text changes, the provider changes, or correction is disabled. Partial write failures never trigger a blind full-text retry; the original remains available in a local recovery window when safe rollback is impossible.
 - No background service and no automatic updater.
 
 ## Installation
@@ -33,6 +37,8 @@ The app does not require administrator privileges. Its system tray menu lets you
 LanguageTool works without additional software. The optional Luna provider requires an installed, current official Codex runtime and a ChatGPT account available to Codex. If Luna or Fast mode is unavailable, the prompt remains unchanged; Codex Language Fix never silently falls back to another model, mode, or provider.
 
 If the active Codex model catalog deliberately omits Luna's no-reasoning mode, Codex Language Fix creates an app-private catalog copy under `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` and enables it only for its own App Server process. The global Codex catalog is never modified, so this additional mode does not appear in Codex Desktop.
+
+If the external catalog setting is later removed, an existing valid app-private copy is reused without modification. The app does not import or convert the global model cache; an explicitly broken catalog setting remains an error.
 
 The published executable is currently not code-signed. Windows may therefore display a security warning the first time you launch it.
 
@@ -51,6 +57,13 @@ LanguageTool is locally limited to 20 requests and 75,000 characters per minute.
 ## Build and test
 
 The .NET 8 SDK on Windows is required.
+
+The focused live format regression is opt-in (12 cases per provider, no raw-text logging):
+
+```powershell
+$env:CODEX_LANGUAGE_FIX_FORMAT_LIVE_TEST = '1'
+dotnet test .\CodexLanguageFix.sln -c Release --filter FullyQualifiedName~LiveFormatRegressionTests
+```
 
 ```powershell
 dotnet test .\CodexLanguageFix.sln

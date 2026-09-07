@@ -6,6 +6,8 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
+Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1** für formaterhaltendes Einsetzen und die Knopfpositionierung. Die automatischen Formatprüfungen beider Anbieter sind bestanden; die Abnahme in den echten Eingabefeldern ist noch offen. Siehe [Prüfbericht](docs/format-repair-2026-09-08.md). Es ist noch kein vollständig abgenommener stabiler Release.
+
 ## Funktionen
 
 - Ein unaufdringlicher `Aa`-Knopf erscheint dynamisch in der aktuellen Eingabeleiste.
@@ -17,8 +19,10 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 - Markdown-Codeblöcke, Inline-Code, URLs, E-Mail-Adressen, Pfade, Befehlsoptionen und typische Codebezeichner bleiben unverändert.
 - Die Zwischenablage wird weder gelesen noch verändert.
 - Der Prompt wird nur nach einem ausdrücklichen Klick übertragen.
-- Änderungen lassen sich direkt rückgängig machen.
-- Unterschiedliche Fensterbreiten, DPI-Skalierungen sowie Chat-, Work- und Planen-Layouts werden dynamisch erkannt.
+- Absätze, Leerzeilen, Einrückungen, Listenzeichen, Checkboxen und Markdown-Zeilenumbrüche werden vor dem Einsetzen geprüft. Unsichere Luna-Antworten werden verworfen, schädliche LanguageTool-Einzelkorrekturen ausgelassen.
+- Änderungen werden über exakt geprüfte Textbereiche eingesetzt, ohne Tippanimation oder erneute Eingabe des gesamten Felds. Rückgängig ist nur im ursprünglichen Editor mit unverändertem Korrekturergebnis möglich.
+- Der kompakte Knopf erscheint nur auf einer geprüften freien Fläche am eindeutig zugeordneten Composer. Bei unklarer Zuordnung oder Platzmangel wird er ausgeblendet. Die Positionierung berücksichtigt die Skalierung des Zielmonitors und negative Bildschirmkoordinaten.
+- Änderungen am Ausgangstext, Editor- oder Anbieterwechsel sowie Deaktivierung brechen laufende Anfragen ab. Nach unklaren Teilschreibfehlern gibt es keinen blinden Volltextersatz; ist eine sichere Rücknahme unmöglich, bleibt das Original in einem lokalen Wiederherstellungsfenster verfügbar.
 - Kein Hintergrunddienst und keine automatische Updatefunktion.
 
 ## Installation
@@ -33,6 +37,8 @@ Die App benötigt keine Administratorrechte. Über das Symbol im Infobereich las
 LanguageTool funktioniert ohne zusätzliche Software. Der optionale Luna-Anbieter setzt eine installierte, aktuelle offizielle Codex-Laufzeit und ein in Codex verfügbares ChatGPT-Konto voraus. Ist Luna oder der Fast Mode nicht verfügbar, bleibt der Prompt unverändert; Codex Language Fix wechselt niemals still auf ein anderes Modell, einen anderen Modus oder einen anderen Anbieter.
 
 Wenn der aktive Codex-Modellkatalog Lunas Modus ohne Thinking bewusst ausblendet, erzeugt Codex Language Fix unter `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` eine app-eigene Katalogkopie und aktiviert ihn ausschließlich für seinen eigenen App-Server-Prozess. Der globale Codex-Katalog wird nicht verändert; dieser zusätzliche Modus erscheint deshalb nicht in Codex Desktop.
+
+Entfällt später der externe Katalogeintrag, wird eine bereits vorhandene gültige app-eigene Kopie unverändert weiterverwendet. Der globale Modellcache wird weder importiert noch konvertiert. Ein ausdrücklich konfigurierter fehlerhafter Pfad bleibt ein Fehler.
 
 Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb beim ersten Start einen Sicherheitshinweis anzeigen.
 

@@ -7,12 +7,16 @@ public sealed class CodexFocusWatcher : IDisposable
 {
     private const uint EventSystemForeground = 0x0003;
     private const uint EventObjectFocus = 0x8005;
+    private const uint EventObjectLocationChange = 0x800B;
+    private const uint EventSystemMinimizeStart = 0x0016;
+    private const uint EventSystemMinimizeEnd = 0x0017;
     private const uint WineventOutOfContext = 0x0000;
 
     private readonly Dispatcher _dispatcher;
     private readonly WinEventDelegate _callback;
     private readonly List<nint> _hooks = [];
     private int _notificationPending;
+    private bool _disposed;
 
     public CodexFocusWatcher(Dispatcher dispatcher)
     {
@@ -20,6 +24,9 @@ public sealed class CodexFocusWatcher : IDisposable
         _callback = OnWinEvent;
         AddHook(EventSystemForeground);
         AddHook(EventObjectFocus);
+        AddHook(EventObjectLocationChange);
+        AddHook(EventSystemMinimizeStart);
+        AddHook(EventSystemMinimizeEnd);
     }
 
     public event EventHandler? Changed;
@@ -35,6 +42,9 @@ public sealed class CodexFocusWatcher : IDisposable
 
     private void OnWinEvent(nint hook, uint eventType, nint window, int objectId, int childId, uint eventThread, uint eventTime)
     {
+        if (_disposed) return;
+        if (eventType == EventObjectLocationChange && window != GetForegroundWindow())
+            return;
         if (Interlocked.Exchange(ref _notificationPending, 1) != 0)
         {
             return;
@@ -43,12 +53,13 @@ public sealed class CodexFocusWatcher : IDisposable
         _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             Interlocked.Exchange(ref _notificationPending, 0);
-            Changed?.Invoke(this, EventArgs.Empty);
+            if (!_disposed) Changed?.Invoke(this, EventArgs.Empty);
         });
     }
 
     public void Dispose()
     {
+        _disposed = true;
         foreach (var hook in _hooks)
         {
             UnhookWinEvent(hook);
@@ -58,6 +69,9 @@ public sealed class CodexFocusWatcher : IDisposable
     }
 
     private delegate void WinEventDelegate(nint hook, uint eventType, nint window, int objectId, int childId, uint eventThread, uint eventTime);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern nint SetWinEventHook(

@@ -16,7 +16,7 @@ public sealed class LiveLunaCorrectionTests
             return;
         }
 
-        var directory = Path.Combine(Path.GetTempPath(), "CodexLanguageFix-Luna-Live");
+        var directory = LunaLiveRuntime.CreateDirectory();
         var localizer = new AppLocalizer("de");
         using var client = new CodexAppServerClient(directory, localizer);
         var account = await client.GetAccountAsync(CancellationToken.None);

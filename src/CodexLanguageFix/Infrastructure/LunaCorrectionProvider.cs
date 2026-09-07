@@ -158,6 +158,14 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         {
             throw new LanguageFixException(localizer.Get(AppText.LunaTimeout));
         }
+        var structureValidation = Stopwatch.StartNew();
+        if (!TextStructure.IsPreserved(text, restored))
+        {
+            throw new LanguageFixException(localizer.Get(AppText.LunaInvalidResponse));
+        }
+
+        structureValidation.Stop();
+        validation += structureValidation.Elapsed;
         stopwatch.Stop();
         _cache?.Set(cacheKey, new LunaCachedCorrection(restored, changeCount));
         var timings = CreateTransportIndependentTimings(transportTiming, validation, restoration);

@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Media.Animation;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Threading;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
 
@@ -11,14 +10,9 @@ namespace CodexLanguageFix.UI;
 
 public partial class OverlayWindow : Window
 {
-    private const double CodexRightControlGap = 5;
-    private const double AntigravityRightControlGap = 1;
     private const int ExtendedStyleIndex = -20;
     private const long ExNoActivate = 0x08000000L;
     private const long ExToolWindow = 0x00000080L;
-    private Rect _lastComposerBounds = Rect.Empty;
-    private Rect? _lastRightControlBounds;
-    private ComposerHost _lastHost = ComposerHost.Codex;
     private bool? _darkTheme;
     private string? _lastStatusMessage;
     private bool _lastStatusCanUndo;
@@ -31,10 +25,12 @@ public partial class OverlayWindow : Window
     {
         _localizer = localizer ?? new AppLocalizer();
         InitializeComponent();
+        StatusPopup.PlacementTarget = CorrectButton;
         ApplyLanguage();
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
         StartBusyAnimation();
         SourceInitialized += (_, _) => ApplyNoActivateStyle();
+        IsVisibleChanged += (_, _) => StatusPopup.IsOpen = IsVisible && _statusVisible;
     }
 
     private void Localizer_OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
@@ -47,7 +43,6 @@ public partial class OverlayWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(UndoButton, _localizer.Get(AppText.Undo));
         CorrectButton.ToolTip = _localizer.Get(AppText.CorrectTooltip);
         System.Windows.Automation.AutomationProperties.SetName(CorrectButton, _localizer.Get(AppText.CorrectAutomationName));
-        RepositionAfterLayout();
     }
 
     public event EventHandler? CorrectRequested;
@@ -74,7 +69,6 @@ public partial class OverlayWindow : Window
 
     public void ShowStatus(string? message, bool canUndo = false)
     {
-        const double compactSize = 36;
         var normalizedMessage = string.IsNullOrWhiteSpace(message) ? null : message;
         var hasMessage = normalizedMessage is not null;
         if (string.Equals(_lastStatusMessage, normalizedMessage, StringComparison.Ordinal)
@@ -83,169 +77,81 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        var wasVisible = _statusVisible;
         _lastStatusMessage = normalizedMessage;
         _lastStatusCanUndo = canUndo;
         _statusVisible = hasMessage;
         StatusStateChangeCount++;
 
         StatusText.Text = normalizedMessage ?? string.Empty;
+        StatusText.ToolTip = normalizedMessage;
         SuccessGlyph.Visibility = canUndo ? Visibility.Visible : Visibility.Collapsed;
         StatusDot.Visibility = canUndo ? Visibility.Collapsed : Visibility.Visible;
         UndoSeparator.Visibility = canUndo ? Visibility.Visible : Visibility.Collapsed;
         UndoButton.Visibility = canUndo ? Visibility.Visible : Visibility.Collapsed;
         StatusPill.Visibility = hasMessage ? Visibility.Visible : Visibility.Collapsed;
-        StatusGap.Visibility = hasMessage ? Visibility.Visible : Visibility.Collapsed;
-        if (hasMessage)
-        {
-            StatusPill.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-            Width = Math.Clamp(StatusPill.DesiredSize.Width + 4 + compactSize, 144, 326);
-            Height = compactSize;
-        }
-        else
-        {
-            Width = compactSize;
-            Height = compactSize;
-        }
-        if (hasMessage && !wasVisible)
-        {
-            StatusPill.BeginAnimation(
-                OpacityProperty,
-                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150))
-                {
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                });
-            StatusTranslate.BeginAnimation(
-                TranslateTransform.XProperty,
-                new DoubleAnimation(4, 0, TimeSpan.FromMilliseconds(170))
-                {
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                });
-        }
-        else if (hasMessage)
-        {
-            StatusPill.BeginAnimation(OpacityProperty, null);
-            StatusTranslate.BeginAnimation(TranslateTransform.XProperty, null);
-            StatusPill.Opacity = 1;
-            StatusTranslate.X = 0;
-        }
-        else
-        {
-            StatusPill.BeginAnimation(OpacityProperty, null);
-            StatusTranslate.BeginAnimation(TranslateTransform.XProperty, null);
-            StatusPill.Opacity = 0;
-            StatusTranslate.X = 4;
-        }
-
-        RepositionAfterLayout();
+        StatusPopup.IsOpen = IsVisible && hasMessage;
     }
 
     public void PositionAt(
         Rect composerBounds,
         Rect? rightControlBounds = null,
-        ComposerHost host = ComposerHost.Codex)
+        ComposerHost host = ComposerHost.Codex,
+        Rect? editorBounds = null,
+        IReadOnlyList<Rect>? occupiedBounds = null)
     {
-        _lastComposerBounds = composerBounds;
-        _lastHost = host;
-        if (IsUsableRightControl(rightControlBounds, composerBounds))
+        if (composerBounds.IsEmpty)
         {
-            _lastRightControlBounds = rightControlBounds;
-        }
-        else if (!IsUsableRightControl(_lastRightControlBounds, composerBounds))
-        {
-            _lastRightControlBounds = null;
-        }
-        ApplyAdaptiveTheme(composerBounds);
-        if (!IsVisible)
-        {
-            Show();
-        }
-
-        UpdateLayout();
-
-        var source = PresentationSource.FromVisual(this);
-        var transform = source?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
-        var topLeft = transform.Transform(new System.Windows.Point(composerBounds.Left, composerBounds.Top));
-        var bottomRight = transform.Transform(new System.Windows.Point(composerBounds.Right, composerBounds.Bottom));
-        var availableWidth = Math.Max(0, bottomRight.X - topLeft.X);
-        const double toolbarGap = 4;
-        double? anchoredTop = null;
-
-        // Der reale Modell-/Mikrofonknopf ist der stabile Anker. Aktuelle Codex-
-        // Layouts legen ihn entweder in dieselbe Zeile wie den Text oder unter
-        // einen mehrzeiligen Textbereich.
-        if (_lastRightControlBounds is { } controlBounds)
-        {
-            var controlTopLeft = transform.Transform(new System.Windows.Point(controlBounds.Left, controlBounds.Top));
-            var controlBottomRight = transform.Transform(new System.Windows.Point(controlBounds.Right, controlBounds.Bottom));
-            Left = CalculateAnchoredLeft(controlTopLeft.X, Width, GetRightControlGap(host));
-            anchoredTop = CalculateVerticalTop(
-                controlTopLeft.Y,
-                controlBottomRight.Y - controlTopLeft.Y,
-                Height);
-        }
-        else
-        {
-            Left = CalculateFallbackLeft(topLeft.X, availableWidth, Width);
-        }
-        Top = anchoredTop ?? bottomRight.Y + toolbarGap;
-    }
-
-    internal static double CalculateAnchoredLeft(double rightControlLeft, double overlayWidth, double gap = CodexRightControlGap) =>
-        rightControlLeft - gap - overlayWidth;
-
-    internal static double GetRightControlGap(ComposerHost host) =>
-        host == ComposerHost.Antigravity
-            ? AntigravityRightControlGap
-            : CodexRightControlGap;
-
-    internal static double CalculateVerticalTop(
-        double controlTop,
-        double controlHeight,
-        double overlayHeight) =>
-        controlTop + (controlHeight - overlayHeight) / 2;
-
-    internal static bool IsUsableRightControl(Rect? rightControlBounds, Rect composerBounds)
-    {
-        if (rightControlBounds is not { } bounds || bounds.IsEmpty || composerBounds.IsEmpty)
-        {
-            return false;
-        }
-
-        var maximumTopDistance = Math.Max(48, composerBounds.Height);
-        return bounds.Width >= 24
-            && bounds.Left >= composerBounds.Left + composerBounds.Width * 0.35
-            && bounds.Left < composerBounds.Right
-            && bounds.Bottom >= composerBounds.Top - 12
-            && bounds.Top <= composerBounds.Bottom + maximumTopDistance;
-    }
-
-    internal static double CalculateFallbackLeft(
-        double composerLeft,
-        double availableWidth,
-        double overlayWidth)
-    {
-        const double horizontalInset = 8;
-        var preferredOffset = Math.Clamp(availableWidth * 0.26, 24, 214);
-        var usableInset = Math.Min(
-            horizontalInset,
-            Math.Max(0, (availableWidth - overlayWidth) / 2));
-        var maximumOffset = Math.Max(
-            usableInset,
-            availableWidth - overlayWidth - usableInset);
-        return composerLeft + Math.Min(preferredOffset, maximumOffset);
-    }
-
-    private void RepositionAfterLayout()
-    {
-        if (_lastComposerBounds.IsEmpty)
-        {
+            Hide();
             return;
         }
-
-        _ = Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            () => PositionAt(_lastComposerBounds, _lastRightControlBounds, _lastHost));
+        var center = new NativePoint
+        {
+            X = (int)Math.Round(composerBounds.Left + composerBounds.Width / 2),
+            Y = (int)Math.Round(composerBounds.Top + composerBounds.Height / 2)
+        };
+        var monitor = MonitorFromPoint(center, 2);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (!GetMonitorInfo(monitor, ref info))
+        {
+            Hide();
+            return;
+        }
+        var scale = GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0 ? dpiX / 96d : 1d;
+        var screen = new Rect(info.Work.Left, info.Work.Top,
+            info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top);
+        var obstacles = (occupiedBounds ?? Array.Empty<Rect>()).ToList();
+        if (rightControlBounds is { IsEmpty: false } control)
+            obstacles.Add(control);
+        // Without a separately identified editor the entire composer is protected.
+        var placement = OverlayPlacement.Find(composerBounds, editorBounds ?? composerBounds,
+            obstacles, screen, scale, rightControlBounds);
+        if (placement is not { } bounds)
+        {
+            Hide();
+            return;
+        }
+        ApplyAdaptiveTheme(composerBounds);
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+        // Screen coordinates stay physical; WPF DIP conversion cannot use another monitor's origin.
+        if (!SetWindowPos(handle, new nint(-1), (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
+            (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x0010))
+        {
+            Hide();
+            return;
+        }
+        if (!IsVisible)
+            Show();
+        if (!SetWindowPos(handle, new nint(-1), (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
+            (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x0010))
+        {
+            Hide();
+            return;
+        }
+        if (StatusPopup.IsOpen)
+        {
+            StatusPopup.HorizontalOffset += 1;
+            StatusPopup.HorizontalOffset -= 1;
+        }
     }
 
     private void ApplyAdaptiveTheme(Rect composerBounds)
@@ -337,6 +243,7 @@ public partial class OverlayWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        StatusPopup.IsOpen = false;
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         base.OnClosed(e);
     }
@@ -353,6 +260,36 @@ public partial class OverlayWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint window, int index);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(NativePoint point, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(nint monitor, int type, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y,
+        int width, int height, uint flags);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern nint SetWindowLongPtr(nint window, int index, nint newValue);

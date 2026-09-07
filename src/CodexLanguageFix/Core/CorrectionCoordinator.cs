@@ -22,6 +22,10 @@ public sealed class CorrectionCoordinator : IDisposable
     private ComposerSnapshot? _visibleSnapshot;
     private UndoState? _undo;
     private bool _busy;
+    private bool _disposed;
+    private ComposerSnapshot? _requestSnapshot;
+    private string? _transientMessage;
+    private DateTimeOffset _transientUntil;
 
     public CorrectionCoordinator(
         IComposerAccessor composerAccessor,
@@ -45,7 +49,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _fallbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(750), DispatcherPriority.Background, (_, _) => RefreshOverlay(), dispatcher);
         _overlay.CorrectRequested += async (_, _) => await CorrectAsync();
         _overlay.UndoRequested += (_, _) => Undo();
-        _tray.EnabledChanged += (_, _) => RefreshOverlay();
+        _tray.EnabledChanged += (_, _) => { _requestCancellation?.Cancel(); RefreshOverlay(); };
         _tray.ConnectionTestRequested += async (_, _) => await TestConnectionAsync();
         _tray.ConnectOpenAiRequested += async (_, _) => await ConnectOpenAiAsync();
         _tray.ProviderChanged += Tray_OnProviderChanged;
@@ -60,6 +64,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private void RefreshOverlay()
     {
+        if (_disposed) return;
         try
         {
             RefreshOverlayCore();
@@ -74,12 +79,11 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private void RefreshOverlayCore()
     {
-        if (!_tray.Enabled || _busy)
+        if (!_tray.Enabled)
         {
-            if (!_busy)
-            {
-                _overlay.Hide();
-            }
+            _requestCancellation?.Cancel();
+            _visibleSnapshot = null;
+            _overlay.Hide();
             return;
         }
 
@@ -87,32 +91,34 @@ public sealed class CorrectionCoordinator : IDisposable
         if (snapshot is null)
         {
             _visibleSnapshot = null;
-            _undo = null;
+            _requestCancellation?.Cancel();
             _overlay.Hide();
             return;
         }
 
+        if (_requestSnapshot is not null && !IsUnchangedEditor(_requestSnapshot, snapshot))
+            _requestCancellation?.Cancel();
+        if (_visibleSnapshot is not null && !_visibleSnapshot.SameEditor(snapshot))
+            _transientMessage = null;
         _visibleSnapshot = snapshot;
         var canUndo = _undo is not null
-            && RuntimeIdsEqual(_undo.Snapshot.RuntimeId, snapshot.RuntimeId)
+            && _undo.Snapshot.SameEditor(snapshot)
             && string.Equals(snapshot.Text, _undo.Corrected, StringComparison.Ordinal);
-        if (!canUndo)
-        {
-            _undo = null;
-        }
 
-        _overlay.ShowStatus(canUndo ? FormatChangeCount(_undo!.ChangeCount, _undo.Provider, _localizer) : null, canUndo);
-        _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host);
+        var message = DateTimeOffset.UtcNow < _transientUntil ? _transientMessage : null;
+        _overlay.ShowStatus(message ?? (_busy ? _localizer.Get(AppText.Checking)
+            : canUndo ? FormatChangeCount(_undo!.ChangeCount, _undo.Provider, _localizer) : null), canUndo && !_busy);
+        PositionOverlay(snapshot);
     }
 
     private async Task CorrectAsync()
     {
-        if (_busy)
+        if (_busy || _disposed)
         {
             return;
         }
 
-        var snapshot = _composerAccessor.TryCaptureFocusedComposer() ?? _visibleSnapshot;
+        var snapshot = _composerAccessor.TryCaptureFocusedComposer();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
             ShowTransient(_localizer.Get(AppText.NoPromptDetected));
@@ -120,20 +126,27 @@ public sealed class CorrectionCoordinator : IDisposable
         }
 
         _busy = true;
+        _requestSnapshot = snapshot;
+        _transientMessage = null;
         _overlay.SetBusy(true);
         _overlay.ShowStatus(_localizer.Get(AppText.Checking));
         _requestCancellation = new CancellationTokenSource();
+        var requestCancellation = _requestCancellation;
         try
         {
             var provider = GetCurrentProvider();
-            var outcome = await provider.CorrectAsync(snapshot.Text, _requestCancellation.Token);
+            var outcome = await provider.CorrectAsync(snapshot.Text, requestCancellation.Token);
+            requestCancellation.Token.ThrowIfCancellationRequested();
+            var active = _composerAccessor.TryCaptureFocusedComposer();
+            if (active is null || !IsUnchangedEditor(snapshot, active))
+                throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
             _logger.Write("check_completed", snapshot.Text.Length, outcome.ChangeCount, outcome.StatusCode, outcome.Elapsed.TotalMilliseconds, provider.Kind);
 
             if (string.Equals(outcome.CorrectedText, snapshot.Text, StringComparison.Ordinal))
             {
                 ShowTransient(provider.Kind == CorrectionProviderKind.Luna
                     ? _localizer.Get(AppText.NoChangesFoundProvider, ProviderName(provider.Kind))
-                    : _localizer.Get(AppText.NoChangesFound));
+                    : _localizer.Get(AppText.NoChangesFound), snapshot);
                 return;
             }
 
@@ -144,7 +157,7 @@ public sealed class CorrectionCoordinator : IDisposable
                 throw new LanguageFixException(_localizer.Get(AppText.ComposerUnavailable));
             }
 
-            if (!string.Equals(current.Text, snapshot.Text, StringComparison.Ordinal))
+            if (!IsUnchangedEditor(snapshot, current))
             {
                 _logger.Write("composer_changed_before_write", snapshot.Text.Length);
                 throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
@@ -166,6 +179,8 @@ public sealed class CorrectionCoordinator : IDisposable
 
             if (!replaced)
             {
+                if (_composerAccessor.LastWriteResult?.State == ComposerWriteState.PartiallyApplied)
+                    new RecoveryWindow(snapshot.Text, _localizer).Show();
                 var detail = _composerAccessor is CodexComposerAccessor accessor
                     ? accessor.LastWriteStatus
                     : "unknown";
@@ -191,29 +206,33 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         catch (OperationCanceledException)
         {
-            ShowTransient(_localizer.Get(AppText.CheckCancelled));
+            ShowTransient(_localizer.Get(AppText.CheckCancelled), snapshot);
         }
         catch (LanguageFixException exception)
         {
             _logger.Write("check_failed", snapshot.Text.Length);
-            ShowTransient(exception.Message);
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
+            ShowTransient(exception.Message, snapshot);
+            if (!_disposed) _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
         }
         catch (Exception exception)
         {
             _logger.Write("unexpected_check_failure", snapshot.Text.Length);
             var message = _localizer.Get(AppText.UnexpectedCorrectionFailure);
-            ShowTransient(message);
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), message, System.Windows.Forms.ToolTipIcon.Error);
+            ShowTransient(message, snapshot);
+            if (!_disposed) _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), message, System.Windows.Forms.ToolTipIcon.Error);
             System.Diagnostics.Debug.WriteLine(exception);
         }
         finally
         {
-            _requestCancellation?.Dispose();
+            requestCancellation.Dispose();
             _requestCancellation = null;
             _busy = false;
-            _overlay.SetBusy(false);
-            _ = _overlay.Dispatcher.BeginInvoke(DispatcherPriority.Background, RefreshOverlay);
+            _requestSnapshot = null;
+            if (!_disposed)
+            {
+                _overlay.SetBusy(false);
+                _ = _overlay.Dispatcher.BeginInvoke(DispatcherPriority.Background, RefreshOverlay);
+            }
         }
     }
 
@@ -224,11 +243,10 @@ public sealed class CorrectionCoordinator : IDisposable
             return;
         }
 
-        var current = _composerAccessor.TryCaptureFocusedComposer()
-            ?? _composerAccessor.TryRefresh(_undo.Snapshot);
-        if (current is null || !MatchesProviderText(current.Text, _undo.Corrected))
+        var current = _composerAccessor.TryCaptureFocusedComposer();
+        if (current is null || !_undo.Snapshot.SameEditor(current)
+            || !string.Equals(current.Text, _undo.Corrected, StringComparison.Ordinal))
         {
-            _undo = null;
             ShowTransient(_localizer.Get(AppText.UndoUnavailable));
             return;
         }
@@ -240,6 +258,8 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         else
         {
+            if (_composerAccessor.LastWriteResult?.State == ComposerWriteState.PartiallyApplied)
+                new RecoveryWindow(_undo.Original, _localizer).Show();
             ShowTransient(_localizer.Get(AppText.UndoFailed));
         }
     }
@@ -283,6 +303,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private async void Tray_OnProviderChanged(object? sender, EventArgs e)
     {
+        _requestCancellation?.Cancel();
         RefreshOverlay();
         if (_tray.CurrentProvider != CorrectionProviderKind.Luna)
         {
@@ -314,31 +335,25 @@ public sealed class CorrectionCoordinator : IDisposable
         ? "Luna"
         : _localizer.Get(AppText.ProviderLanguageTool);
 
-    private void ShowTransient(string message)
+    private void ShowTransient(string message, ComposerSnapshot? origin = null)
     {
-        _overlay.ShowStatus(message, _undo is not null);
-        var snapshot = _visibleSnapshot ?? _undo?.Snapshot;
-        _overlay.PositionAt(
-            snapshot?.Bounds ?? System.Windows.Rect.Empty,
-            snapshot?.RightControlBounds,
-            snapshot?.Host ?? ComposerHost.Codex);
+        if (_disposed || (origin is not null && !origin.SameEditor(_composerAccessor.TryCaptureFocusedComposer())))
+            return;
+        _transientMessage = message;
+        _transientUntil = DateTimeOffset.UtcNow.AddSeconds(6);
+        RefreshOverlay();
     }
 
-    private static bool RuntimeIdsEqual(IReadOnlyList<int> left, IReadOnlyList<int> right) =>
-        left.Count == right.Count && left.SequenceEqual(right);
+    private void PositionOverlay(ComposerSnapshot snapshot) =>
+        _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host,
+            snapshot.EditorBounds, snapshot.OccupiedBounds);
 
-    internal static bool MatchesProviderText(string observed, string expected) =>
-        string.Equals(observed, expected, StringComparison.Ordinal)
-        || (observed.Length == expected.Length + 1
-            && (observed[^1] == '\r' || observed[^1] == '\n')
-            && observed.AsSpan(0, expected.Length).SequenceEqual(expected.AsSpan()));
+    internal static bool IsUnchangedEditor(ComposerSnapshot expected, ComposerSnapshot observed) =>
+        expected.SameEditor(observed) && string.Equals(expected.Text, observed.Text, StringComparison.Ordinal);
 
     private void Localizer_OnLanguageChanged(object? sender, EventArgs e)
     {
-        if (_undo is not null)
-        {
-            _overlay.ShowStatus(FormatChangeCount(_undo.ChangeCount, _undo.Provider, _localizer), true);
-        }
+        RefreshOverlay();
     }
 
     internal static string FormatChangeCount(int count, CorrectionProviderKind provider, AppLocalizer localizer)
@@ -354,8 +369,9 @@ public sealed class CorrectionCoordinator : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _requestCancellation?.Cancel();
-        _requestCancellation?.Dispose();
         _fallbackTimer.Stop();
         _focusWatcher.Dispose();
         _tray.ProviderChanged -= Tray_OnProviderChanged;

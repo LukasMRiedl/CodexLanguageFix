@@ -23,21 +23,8 @@ public sealed class OverlayWindowTests
         Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count, CorrectionProviderKind.Luna, new AppLocalizer(language)));
     }
 
-    [Theory]
-    [InlineData("Das ist korrekt.", "Das ist korrekt.", true)]
-    [InlineData("Das ist korrekt.\r", "Das ist korrekt.", true)]
-    [InlineData("Das ist korrekt.\n", "Das ist korrekt.", true)]
-    [InlineData("Anderer Text", "Das ist korrekt.", false)]
-    public void ProviderText_AllowsOnlyOneTerminalAutomationMarker(
-        string observed,
-        string expected,
-        bool matches)
-    {
-        Assert.Equal(matches, CorrectionCoordinator.MatchesProviderText(observed, expected));
-    }
-
     [Fact]
-    public void StatusLayout_ExpandsAndReturnsToCompactWidth()
+    public void StatusLayout_RemainsCompactAndUsesSeparatePopup()
     {
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -45,12 +32,21 @@ public sealed class OverlayWindowTests
             try
             {
                 var overlay = new OverlayWindow(new AppLocalizer("de"));
+                var correctionRequests = 0;
+                var undoRequests = 0;
+                overlay.CorrectRequested += (_, _) => correctionRequests++;
+                overlay.UndoRequested += (_, _) => undoRequests++;
                 overlay.ShowStatus(null);
                 Assert.Equal(36, overlay.Width);
                 Assert.Equal(36, overlay.Height);
+                Assert.False(overlay.StatusPopup.IsOpen);
+                Assert.False(overlay.StatusPopup.Focusable);
+                Assert.False(overlay.CorrectButton.Focusable);
+                Assert.False(overlay.UndoButton.Focusable);
 
                 overlay.ShowStatus("2 Änderungen", canUndo: true);
-                Assert.InRange(overlay.Width, 144, 326);
+                Assert.Equal(36, overlay.Width);
+                Assert.Same(overlay.CorrectButton, overlay.StatusPopup.PlacementTarget);
                 Assert.Equal(36, overlay.Height);
                 Assert.Equal(15, overlay.StatusPill.Height);
                 Assert.Equal(13, overlay.UndoButton.Height);
@@ -64,6 +60,9 @@ public sealed class OverlayWindowTests
 
                 Assert.Equal(stableWidth, overlay.Width);
                 Assert.Equal(stateChanges, overlay.StatusStateChangeCount);
+                overlay.SetBusy(true);
+                Assert.Equal("2 Änderungen", overlay.StatusText.Text);
+                Assert.Equal(36, overlay.Width);
 
                 overlay.SetBusy(true);
                 Assert.Equal(System.Windows.Visibility.Visible, overlay.BusyGlyph.Visibility);
@@ -74,6 +73,14 @@ public sealed class OverlayWindowTests
                 overlay.ShowStatus(null);
                 Assert.Equal(36, overlay.Width);
                 Assert.Equal(36, overlay.Height);
+                Assert.Equal(0, correctionRequests);
+                Assert.Equal(0, undoRequests);
+                overlay.UndoButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                Assert.Equal(0, correctionRequests);
+                Assert.Equal(1, undoRequests);
+                overlay.CorrectButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                Assert.Equal(1, correctionRequests);
+                Assert.Equal(1, undoRequests);
                 overlay.Close();
             }
             catch (Exception exception)
@@ -91,78 +98,46 @@ public sealed class OverlayWindowTests
     }
 
     [Theory]
-    [InlineData(100, 1200, 36, 314)]
-    [InlineData(100, 784, 36, 303.84)]
-    [InlineData(100, 600, 36, 256)]
-    [InlineData(100, 120, 36, 131.2)]
-    [InlineData(100, 60, 36, 116)]
-    [InlineData(100, 40, 36, 102)]
-    public void FallbackPosition_RemainsInsideComposerAtEverySupportedWidth(
-        double composerLeft,
-        double composerWidth,
-        double overlayWidth,
-        double expected)
+    [InlineData(1)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2)]
+    public void Placement_UsesPhysicalPixelsAndAvoidsEditorAndControls(double scale)
     {
-        var left = OverlayWindow.CalculateFallbackLeft(composerLeft, composerWidth, overlayWidth);
-
-        Assert.Equal(expected, left, precision: 2);
-        Assert.True(left >= composerLeft);
-        Assert.True(left + overlayWidth <= composerLeft + composerWidth);
-    }
-
-    [Theory]
-    [InlineData(1100, 36, 1059)]
-    [InlineData(1100, 180, 915)]
-    [InlineData(980, 180, 795)]
-    public void AnchoredPosition_FollowsVariableRightControlWidth(
-        double rightControlLeft,
-        double overlayWidth,
-        double expected)
-    {
-        Assert.Equal(expected, OverlayWindow.CalculateAnchoredLeft(rightControlLeft, overlayWidth));
+        var composer = new System.Windows.Rect(-1200 * scale, 100 * scale, 600 * scale, 200 * scale);
+        var editor = new System.Windows.Rect(-1190 * scale, 110 * scale, 580 * scale, 130 * scale);
+        var control = new System.Windows.Rect(-650 * scale, 250 * scale, 40 * scale, 40 * scale);
+        var screen = new System.Windows.Rect(-1600 * scale, 0, 1600 * scale, 1000 * scale);
+        var bounds = OverlayPlacement.Find(composer, editor, [control], screen, scale, control);
+        Assert.NotNull(bounds);
+        Assert.Equal(36 * scale, bounds.Value.Width);
+        Assert.True(composer.Contains(bounds.Value));
+        Assert.True(screen.Contains(bounds.Value));
+        Assert.False(editor.IntersectsWith(bounds.Value));
+        Assert.False(control.IntersectsWith(bounds.Value));
+        Assert.True(bounds.Value.Left < 0);
     }
 
     [Fact]
-    public void HostSpecificGap_MatchesEachNativeToolbar()
+    public void Placement_FindsFreeGapBetweenToolbarControls()
     {
-        Assert.Equal(5, OverlayWindow.GetRightControlGap(CodexLanguageFix.Contracts.ComposerHost.Codex));
-        Assert.Equal(1, OverlayWindow.GetRightControlGap(CodexLanguageFix.Contracts.ComposerHost.Antigravity));
+        var composer = new System.Windows.Rect(100, 100, 600, 200);
+        var editor = new System.Windows.Rect(100, 100, 600, 150);
+        System.Windows.Rect[] controls = [new(100, 250, 400, 50), new(550, 250, 150, 50)];
+        var placement = OverlayPlacement.Find(composer, editor, controls,
+            new System.Windows.Rect(0, 0, 1920, 1080), 1, controls[1]);
+        Assert.NotNull(placement);
+        Assert.InRange(placement.Value.Left, 500, 514);
+        Assert.DoesNotContain(controls, r => r.IntersectsWith(placement.Value));
     }
 
-    [Theory]
-    [InlineData(546.5, 28.5, 36, 542.75)]
-    [InlineData(420, 40, 36, 422)]
-    public void VerticalPosition_UsesNativeControlCenter(
-        double controlTop,
-        double controlHeight,
-        double overlayHeight,
-        double expected)
+    [Fact]
+    public void Placement_HidesWhenEditorOrScreenLeavesNoSpace()
     {
-        Assert.Equal(
-            expected,
-            OverlayWindow.CalculateVerticalTop(
-                controlTop,
-                controlHeight,
-                overlayHeight),
-            precision: 2);
-    }
-
-    [Theory]
-    [InlineData(560, 510, 24, true)]
-    [InlineData(560, 420, 120, true)]
-    [InlineData(560, 356, 120, true)]
-    [InlineData(560, 355, 120, false)]
-    [InlineData(560, 510, 23, false)]
-    [InlineData(300, 510, 120, false)]
-    [InlineData(700, 510, 120, false)]
-    public void RightControlValidation_SupportsVariableWidthsWithoutAcceptingUnrelatedControls(
-        double left,
-        double top,
-        double width,
-        bool expected)
-    {
-        var composer = new System.Windows.Rect(100, 400, 600, 100);
-        var control = new System.Windows.Rect(left, top, width, 32);
-        Assert.Equal(expected, OverlayWindow.IsUsableRightControl(control, composer));
+        var composer = new System.Windows.Rect(0, 0, 600, 200);
+        Assert.Null(OverlayPlacement.Find(composer, composer, [], composer, 1));
+        Assert.Null(OverlayPlacement.Find(composer, new System.Windows.Rect(0, 0, 600, 150),
+            [], new System.Windows.Rect(0, 0, 600, 160), 1));
+        Assert.Null(OverlayPlacement.Find(composer, System.Windows.Rect.Empty, [], composer, 1));
     }
 }

@@ -43,8 +43,8 @@
     </Style>
 
     <Style x:Key="ComposerIconButton" TargetType="Button">
-      <Setter Property="Width" Value="32" />
-      <Setter Property="Height" Value="32" />
+      <Setter Property="Width" Value="36" />
+      <Setter Property="Height" Value="36" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
       <Setter Property="Background" Value="{DynamicResource ButtonBrush}" />
@@ -118,16 +118,12 @@
   </Window.Resources>
 
   <Grid VerticalAlignment="Center">
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="Auto" />
-      <ColumnDefinition Width="Auto" />
-      <ColumnDefinition Width="Auto" />
-    </Grid.ColumnDefinitions>
-
+    <Popup x:Name="StatusPopup" PlacementTarget="{Binding ElementName=CorrectButton}"
+           Placement="Bottom" VerticalOffset="4" AllowsTransparency="True"
+           StaysOpen="True" Focusable="False">
     <Border x:Name="StatusPill"
-            Grid.Column="0"
             Visibility="Collapsed"
-            Opacity="0"
+            Opacity="1"
             Height="15"
             VerticalAlignment="Center"
             Background="{DynamicResource OverlaySurfaceBrush}"
@@ -183,18 +179,10 @@
           </StackPanel>
         </Button>
       </StackPanel>
-      <Border.RenderTransform>
-        <TranslateTransform x:Name="StatusTranslate" X="4" Y="-2" />
-      </Border.RenderTransform>
     </Border>
-
-    <Border x:Name="StatusGap"
-            Grid.Column="1"
-            Width="4"
-            Visibility="Collapsed" />
+    </Popup>
 
     <Button x:Name="CorrectButton"
-            Grid.Column="2"
             VerticalAlignment="Center"
             Style="{StaticResource ComposerIconButton}"
             Click="CorrectButton_OnClick"

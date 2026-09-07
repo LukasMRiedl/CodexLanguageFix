@@ -47,7 +47,8 @@ public sealed class CorrectionEngine : ICorrectionEngine
         }
 
         var candidates = matches
-            .Where(match => match.Offset >= 0 && match.Length >= 0 && match.Offset + match.Length <= original.Length)
+            .Where(match => match.Offset >= 0 && match.Offset <= original.Length
+                && match.Length >= 0 && match.Length <= original.Length - match.Offset)
             .Where(match => match.Replacements.Count > 0)
             .Where(match => !prompt.ProtectedSpans.Any(span => span.Overlaps(match.Offset, Math.Max(match.Length, 1))))
             .Select(match => new Candidate(match, match.Replacements[0]))
@@ -55,6 +56,9 @@ public sealed class CorrectionEngine : ICorrectionEngine
                 original.Substring(candidate.Match.Offset, candidate.Match.Length),
                 candidate.Replacement,
                 StringComparison.Ordinal))
+            .Where(candidate => TextStructure.IsPreserved(original,
+                original.Remove(candidate.Match.Offset, candidate.Match.Length)
+                    .Insert(candidate.Match.Offset, candidate.Replacement)))
             .OrderByDescending(candidate => candidate.Match.Confidence ?? double.MinValue)
             .ThenByDescending(candidate => candidate.Match.Length)
             .ThenBy(candidate => candidate.Match.ResponseIndex)
@@ -73,8 +77,14 @@ public sealed class CorrectionEngine : ICorrectionEngine
         var applied = new List<AppliedCorrection>();
         foreach (var candidate in selected.OrderByDescending(candidate => candidate.Match.Offset))
         {
-            corrected = corrected.Remove(candidate.Match.Offset, candidate.Match.Length)
+            var updated = corrected.Remove(candidate.Match.Offset, candidate.Match.Length)
                 .Insert(candidate.Match.Offset, candidate.Replacement);
+            if (!TextStructure.IsPreserved(original, updated))
+            {
+                continue;
+            }
+
+            corrected = updated;
             applied.Add(new AppliedCorrection(
                 candidate.Match.Offset,
                 candidate.Match.Length,
