@@ -1,5 +1,8 @@
 # Reparatur der wiederholten Schreibablehnung
 
+Historischer Prüfstand RC3. Die spätere [Listenreparatur in RC4](list-repair-2026-09-08.md)
+ergänzt diesen Fix und ersetzt die nachstehend dokumentierte lokale Installation.
+
 ## Ursache und Änderung
 
 Die installierte RC2 meldete nach erfolgreichen Luna-Antworten wiederholt
