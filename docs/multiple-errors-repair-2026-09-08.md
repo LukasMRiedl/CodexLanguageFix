@@ -17,4 +17,10 @@ Das Produktionsprofil bleibt `baseline / none / full-v1`, OAuth-only. Keine neue
 
 ## Lokale Auslieferung
 
-Die Installations- und abschließenden Overlay-Prüfdaten werden nach dem Paketabgleich ergänzt. GitHub-Veröffentlichung ist nicht Bestandteil dieses lokalen RC5-Nachweises.
+- Paket und installierte Datei: `1.3.1-rc.5+413021881cf48c217af0dc740fa6265697f7b03c`.
+- SHA256 beider Dateien: `A03E466016C2D2CA2C0ECF152C41EF9F88A1171E427820F84783DA3AD65CF3E4`.
+- Installiert unter `C:\Users\lukas\.codex\.chatgpt-projects\g-p-6a60c6d22cb88191be272153223ad7f6\dist\CodexLanguageFix\CodexLanguageFix.exe`; laufender Prozess beim Abschluss: 76808.
+- Vorherige RC4 gesichert unter `artifacts/list-repair/installed-backup-1.3.1-rc.4.exe`.
+- Abschließender echter Aa-/Luna-/Rückgängig-Test der installierten Anwendung: drei identische Stichpunkte mit insgesamt neun Fehlern vollständig korrigiert und exakt zurückgesetzt. Bericht: `artifacts/list-repair/installed-luna-multiple-bullets-rc5.trx`, bestanden. Protokoll bestätigt `check_completed`, `composer_write_completed`, `composer_undo_completed`.
+
+GitHub-Veröffentlichung ist nicht Bestandteil dieses lokalen RC5-Nachweises.
