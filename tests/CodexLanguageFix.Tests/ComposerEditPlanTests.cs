@@ -7,6 +7,44 @@ namespace CodexLanguageFix.Tests;
 public sealed class ComposerEditPlanTests
 {
     [Theory]
+    [InlineData("Siehe https://example.test", "Siehe https://example.test.")]
+    [InlineData("Nutze --output=result.txt", "Nutze --output=result.txt.")]
+    [InlineData("korekt `x`\r\nklein Fehler https://example.test", "korrekt `x`.\r\nkleiner Fehler https://example.test.")]
+    [InlineData("Ein guter Satz `x`.\r\nZwei kurze Wörter `y`", "Ein Satz `x`\r\nZwei sehr kurze Wörter `y`.")]
+    [InlineData("🙂 `x`\r\nText", "🙃! `x`.\r\nText.")]
+    public void ReverseUsesCorrectedOffsetsWithoutReclassifyingProtectedSpans(string original, string corrected)
+    {
+        var plan = Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(original, corrected));
+        var reverse = plan.Reverse();
+        Assert.Equal(corrected, reverse.Original);
+        Assert.Equal(original, reverse.Corrected);
+        Assert.Equal(reverse.Edits.OrderByDescending(edit => edit.Start), reverse.Edits);
+        var target = new MemoryTarget(original);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(plan, target).State);
+        Assert.Equal(corrected, target.Text);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(reverse, target).State);
+        Assert.Equal(original, target.Text);
+        Assert.Equal(plan.Edits, reverse.Reverse().Edits);
+    }
+
+    [Fact]
+    public void ReverseAdjustsEveryLaterStartByAllEarlierLengthChanges()
+    {
+        var plan = new ComposerEditPlan("abc def ghi", "a defXYZ g",
+        [new ComposerTextEdit(8, "ghi", "g"), new ComposerTextEdit(4, "def", "defXYZ"), new ComposerTextEdit(0, "abc", "a")]);
+        var reverse = plan.Reverse();
+        Assert.Equal(new[]
+        {
+            new ComposerTextEdit(9, "g", "ghi"),
+            new ComposerTextEdit(2, "defXYZ", "def"),
+            new ComposerTextEdit(0, "a", "abc")
+        }, reverse.Edits);
+        var target = new MemoryTarget(plan.Corrected);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(reverse, target).State);
+        Assert.Equal(plan.Original, target.Text);
+    }
+
+    [Theory]
     [InlineData("abc", "Xabc", 0, "a", "Xa")]
     [InlineData("abc", "aXbc", 0, "a", "aX")]
     [InlineData("Das ist ein Test", "Das ist ein Test.", 15, "t", "t.")]
@@ -42,10 +80,53 @@ public sealed class ComposerEditPlanTests
     [InlineData("Use `x`.", "Use `x`")]
     [InlineData("`x`\r\n", "`x`.\r\n")]
     [InlineData("`x`.\r\n", "`x`\r\n")]
-    public void OneSidedEditsWithoutAnUnprotectedAnchorAreRejected(string original, string corrected)
+    public void OneSidedEditsWithoutAnUnprotectedAnchorRemainInsideTheFreeGap(string original, string corrected)
     {
         Assert.True(TextStructure.IsPreserved(original, corrected));
+        var plan = Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(original, corrected));
+        var edit = Assert.Single(plan.Edits);
+        Assert.True(edit.Original.Length == 0 || edit.Replacement.Length == 0);
+        Assert.Equal(".", edit.Original + edit.Replacement);
+        var target = new MemoryTarget(original);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(plan, target).State);
+        Assert.Equal(corrected, target.Text);
+    }
+
+    [Theory]
+    [InlineData("Siehe https://example.test", "Siehe https://example.test.")]
+    [InlineData("Nutze --output=result.txt", "Nutze --output=result.txt.")]
+    [InlineData("Nutze `foo`", "Nutze `foo`.")]
+    [InlineData("abc`x`", "abcX`x`")]
+    [InlineData("ein wert ist korekt", "ein neuerWert ist korrekt")]
+    [InlineData("Korekt `x` und `x`", "Korrekt `x` und `x`.")]
+    [InlineData("- Korekt https://example.test\r\n- Nutze `foo`\r\n", "- Korrekt https://example.test.\r\n- Nutze `foo`.\r\n")]
+    [InlineData("Korekt\n```\nvar x = 1;\n```\n", "Korrekt\n```\nvar x = 1;\n```\n")]
+    public void PreservesSourceTechnicalSpansWithoutReclassifyingCorrectedProse(string original, string corrected)
+    {
+        var plan = Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(original, corrected));
+        var sourceSpans = ProtectedSpanDetector.Detect(original);
+        Assert.All(plan.Edits, edit => Assert.All(sourceSpans, span =>
+            Assert.True(edit.Start + edit.Original.Length <= span.Start || edit.Start >= span.End)));
+        var target = new MemoryTarget(original);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(plan, target).State);
+        Assert.Equal(corrected, target.Text);
+    }
+
+    [Theory]
+    [InlineData("Nutze `x`", "Nutze `x` oder `x`")]
+    [InlineData("Nutze `x` und `x`", "Nutze `x`")]
+    [InlineData("Nutze `x` und `y`", "Nutze `y` und `x`")]
+    [InlineData("Nutze https://example.test", "Nutze https://other.test.")]
+    [InlineData("Nutze --output=result.txt", "Nutze --output=other.txt.")]
+    [InlineData("Korekt\n```\nvar x = 1;\n```\n", "Korrekt\n```\nvar x = 2;\n```\n")]
+    public void RejectsAmbiguousReorderedDeletedOrMutatedSourceTechnicalSpans(string original, string corrected) =>
         Assert.Null(ComposerEditPlan.Create(original, corrected));
+
+    [Fact]
+    public void UnchangedTechnicalTextRequiresNoOccurrenceGuessing()
+    {
+        const string text = "Nutze foo_bar und foo_bar_long";
+        Assert.Empty(Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(text, text)).Edits);
     }
 
     [Theory]
@@ -84,7 +165,6 @@ public sealed class ComposerEditPlanTests
     [InlineData("Vor\ufffc nach", "Vor nach")]
     [InlineData("[Text](https://example.test)", "[Text](https://other.test)")]
     [InlineData("Text\tText", "Text Text")]
-    [InlineData("abc`x`", "abcX`x`")]
     public void RejectsMutatedStructureTechnicalSpansAndObjects(string original, string corrected) =>
         Assert.Null(ComposerEditPlan.Create(original, corrected));
 

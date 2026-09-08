@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace CodexLanguageFix.Core;
@@ -7,6 +8,53 @@ public static class TextStructure
     private static readonly Regex PrefixToken = new(
         @"\G(?:[^\S\r\n]+|>[^\S\r\n]?|(?:[-+*•◦▪‣⁃]|[0-9]+[.)])[^\S\r\n]+|#{1,6}[^\S\r\n]+|\[[ xX]\][^\S\r\n]+)",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    public static bool TryRestoreLayout(string original, string corrected, out string restored)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        ArgumentNullException.ThrowIfNull(corrected);
+        restored = string.Empty;
+        var source = GetLines(original);
+        var target = GetLines(corrected).Where(line => !line.Content.AsSpan().IsWhiteSpace()).ToArray();
+        if (source.Count(line => !line.Content.AsSpan().IsWhiteSpace()) != target.Length)
+        {
+            return false;
+        }
+
+        var builder = new StringBuilder(Math.Max(original.Length, corrected.Length));
+        var targetIndex = 0;
+        foreach (var before in source)
+        {
+            if (before.Content.AsSpan().IsWhiteSpace())
+            {
+                builder.Append(before.Content).Append(before.LineEnding);
+                continue;
+            }
+
+            var after = target[targetIndex++];
+            var beforeMarkers = before.Content[..before.PrefixLength].Where(character => !char.IsWhiteSpace(character));
+            var afterMarkers = after.Content[..after.PrefixLength].Where(character => !char.IsWhiteSpace(character));
+            if (!beforeMarkers.SequenceEqual(afterMarkers))
+            {
+                return false;
+            }
+
+            builder.Append(before.Content.AsSpan(0, before.PrefixLength));
+            builder.Append(after.Content.AsSpan(after.PrefixLength,
+                Math.Max(0, after.Content.Length - after.PrefixLength - after.TrailingWhitespaceLength)));
+            builder.Append(before.Content.AsSpan(before.Content.Length - before.TrailingWhitespaceLength));
+            builder.Append(before.LineEnding);
+        }
+
+        var value = builder.ToString();
+        if (!IsPreserved(original, value))
+        {
+            return false;
+        }
+
+        restored = value;
+        return true;
+    }
 
     public static bool IsPreserved(string original, string corrected)
     {

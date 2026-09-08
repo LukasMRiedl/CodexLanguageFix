@@ -6,7 +6,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source contains **release candidate 1.3.1-rc.4**, fixing repeated safe-insertion failures in lists. All 329 offline tests passed; 22 real native correction/undo cases covered three and five repeated bullet points, including end-of-line insertions. See the [list repair report](docs/list-repair-2026-09-08.md) for the cause, verification and installation. Earlier [selection](docs/selection-repair-2026-09-08.md) and [format](docs/format-repair-2026-09-08.md) reports retain the previous evidence. Historical message edit dialogs, mixed-DPI monitors and screen-edge cases remain unverified; narrow overlapping layouts and empty placeholder fields still have known placement limitations. RC4 is not yet published on GitHub and is not a fully accepted stable release.
+The current source contains **release candidate 1.3.1-rc.5**, fixing unnecessary rejections of multi-error corrections. Layout whitespace is restored locally; punctuation can follow protected technical content without rewriting it. All 387 offline tests, four real Luna multi-error cases and native correction/undo checks including three bullets with nine errors passed. See the [multi-error repair report](docs/multiple-errors-repair-2026-09-08.md). Earlier verification reports remain available. Historical message edit dialogs, mixed-DPI monitors and screen-edge cases remain unverified; known placement limitations are outside this repair. RC5 is not yet published on GitHub and is not a fully accepted stable release.
 
 ## Features
 

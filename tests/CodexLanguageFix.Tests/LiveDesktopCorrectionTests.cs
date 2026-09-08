@@ -38,6 +38,41 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         .ToArray();
 
     [Fact]
+    public void PreparedSyntheticMultipleErrors_DirectNativeRoundTrip()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_MULTI_ERROR_NATIVE_TEST") != "1") return;
+        RunNativeRoundTrip(MultipleErrorFixtures(), ComposerHost.Codex);
+    }
+
+    [Fact]
+    public void PreparedSyntheticMultipleErrors_IsCorrectedAndUndoneThroughOwnOverlay()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_MULTI_ERROR_LIVE_TEST") != "1") return;
+        RunOverlayRoundTrip(MultipleErrorFixtures(), ComposerHost.Codex);
+    }
+
+    private static PreparedFixture[] MultipleErrorFixtures() =>
+        (from suffix in new[] { "", "\n", "\r\n" }
+         select new PreparedFixture(
+             "Das ist ein fehler. Die katze sitzt auf dem tisch. Der hund liegt im garten." + suffix,
+             "Das ist ein Fehler. Die Katze sitzt auf dem Tisch. Der Hund liegt im Garten." + suffix))
+        .Concat(from marker in new[] { "• ", "- " }
+            from newline in new[] { "\n", "\r\n" }
+            from suffix in new[] { "", newline }
+            select new PreparedFixture(
+                string.Join(newline, Enumerable.Repeat(marker + "Das ist ein fehler. Die katze sitzt auf dem tisch.", 3)) + suffix,
+                string.Join(newline, Enumerable.Repeat(marker + "Das ist ein Fehler. Die Katze sitzt auf dem Tisch.", 3)) + suffix)).ToArray();
+
+    [Fact]
+    public void PreparedSyntheticProtectedEnd_DirectNativeRoundTrip()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_PROTECTED_END_NATIVE_TEST") != "1") return;
+        RunNativeRoundTrip((from token in new[] { "https://example.com", "--output=result.txt", "`foo`" }
+            from suffix in new[] { "", "\n", "\r\n" }
+            select new PreparedFixture("Prüfe " + token + suffix, "Prüfe " + token + "." + suffix)).ToArray(), ComposerHost.Codex);
+    }
+
+    [Fact]
     public void PreparedSyntheticSentence_IsCorrectedAndUndoneThroughOwnOverlay()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_LIVE_TEST") != "1")

@@ -75,7 +75,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
 
         var cacheKey = LunaCorrectionCache.CreateKey(
             text,
-            $"{CodexAppServerClient.LunaModel}\0{CodexAppServerClient.LunaEffort}\0adaptive-v2-{_outputProtocol}-{_patchThreshold}\0{DeveloperPrompt}");
+            $"{CodexAppServerClient.LunaModel}\0{CodexAppServerClient.LunaEffort}\0adaptive-v3-{_outputProtocol}-{_patchThreshold}\0{DeveloperPrompt}");
         if (_cache?.TryGet(cacheKey, out var cached) == true)
         {
             return new CorrectionProviderResult(
@@ -159,11 +159,14 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             throw new LanguageFixException(localizer.Get(AppText.LunaTimeout));
         }
         var structureValidation = Stopwatch.StartNew();
-        if (!TextStructure.IsPreserved(text, restored))
+        if (!TextStructure.TryRestoreLayout(text, restored, out var layoutRestored)
+            || HasUnexpectedControlCharacters(layoutRestored))
         {
             throw new LanguageFixException(localizer.Get(AppText.LunaInvalidResponse));
         }
 
+        restored = layoutRestored;
+        if (restored == text) changeCount = 0;
         structureValidation.Stop();
         validation += structureValidation.Elapsed;
         stopwatch.Stop();

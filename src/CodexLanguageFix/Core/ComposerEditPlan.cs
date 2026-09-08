@@ -7,32 +7,49 @@ public sealed record ComposerTextEdit(int Start, string Original, string Replace
 
 public sealed record ComposerEditPlan(string Original, string Corrected, IReadOnlyList<ComposerTextEdit> Edits)
 {
+    public ComposerEditPlan Reverse()
+    {
+        var offset = 0;
+        var reversed = new List<ComposerTextEdit>(Edits.Count);
+        foreach (var edit in Edits.OrderBy(edit => edit.Start))
+        {
+            reversed.Add(new ComposerTextEdit(edit.Start + offset, edit.Replacement, edit.Original));
+            offset += edit.Replacement.Length - edit.Original.Length;
+        }
+        return new ComposerEditPlan(Corrected, Original, reversed.OrderByDescending(edit => edit.Start).ToArray());
+    }
+
     public static ComposerEditPlan? Create(string original, string corrected)
     {
         if (!TextStructure.IsPreserved(original, corrected))
         {
             return null;
         }
+        if (original == corrected)
+        {
+            return new ComposerEditPlan(original, corrected, []);
+        }
 
-        var before = GetFrozenRanges(original);
-        var after = GetFrozenRanges(corrected);
-        if (before.Count != after.Count)
+        var anchors = MapFrozenRanges(original, corrected);
+        if (anchors is null)
         {
             return null;
         }
+        var before = anchors.Select(anchor => anchor.Before).ToArray();
+        var after = anchors.Select(anchor => anchor.After).ToArray();
 
         var edits = new List<ComposerTextEdit>();
         var beforeStart = 0;
         var afterStart = 0;
-        for (var index = 0; index <= before.Count; index++)
+        for (var index = 0; index <= before.Length; index++)
         {
-            var beforeEnd = index == before.Count ? original.Length : before[index].Start;
-            var afterEnd = index == after.Count ? corrected.Length : after[index].Start;
+            var beforeEnd = index == before.Length ? original.Length : before[index].Start;
+            var afterEnd = index == after.Length ? corrected.Length : after[index].Start;
             if (!AddEdit(original[beforeStart..beforeEnd], corrected[afterStart..afterEnd], beforeStart, edits))
             {
                 return null;
             }
-            if (index == before.Count)
+            if (index == before.Length)
             {
                 break;
             }
@@ -92,8 +109,8 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
 
         if (original.Length - prefix - suffix == 0 || corrected.Length - prefix - suffix == 0)
         {
-            // Der native Schreibpfad benötigt auch für den Rückweg eine nichtleere Textauswahl.
-            // AddEdit erhält ausschließlich einen einzelnen, bereits ungeschützten Textblock.
+            // Freie Grapheme dienen nach Möglichkeit als Auswahlanker. Geschützte Nachbarn
+            // werden dafür nie einbezogen; ohne freien Anker bleibt die Änderung einseitig.
             if (prefix > 0)
             {
                 prefix = originalBoundaries.Where(boundary => boundary < prefix
@@ -108,10 +125,6 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
                     .Where(length => correctedBoundaries.Contains(correctedEnd + length)).Min();
                 suffix -= anchorLength;
             }
-            else
-            {
-                return false;
-            }
         }
 
         edits.Add(new ComposerTextEdit(start + prefix,
@@ -120,9 +133,87 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
         return true;
     }
 
-    private static IReadOnlyList<TextSpan> GetFrozenRanges(string text)
+    private sealed record FrozenAnchor(TextSpan Before, TextSpan After);
+
+    private static IReadOnlyList<FrozenAnchor>? MapFrozenRanges(string original, string corrected)
     {
-        var ranges = ProtectedSpanDetector.Detect(text).ToList();
+        var beforeStructure = GetStructureRanges(original);
+        var afterStructure = GetStructureRanges(corrected);
+        if (beforeStructure.Count != afterStructure.Count)
+        {
+            return null;
+        }
+
+        var anchors = new List<FrozenAnchor>();
+        for (var index = 0; index < beforeStructure.Count; index++)
+        {
+            var before = beforeStructure[index];
+            var after = afterStructure[index];
+            if (!original.AsSpan(before.Start, before.Length).SequenceEqual(corrected.AsSpan(after.Start, after.Length)))
+            {
+                return null;
+            }
+            anchors.Add(new FrozenAnchor(before, after));
+        }
+
+        // Only the original decides what is technical. New punctuation or identifiers in
+        // corrected prose must not enlarge an immutable source span.
+        var technical = ProtectedSpanDetector.Detect(original);
+        var earliest = new int[technical.Count];
+        var cursor = 0;
+        for (var index = 0; index < technical.Count; index++)
+        {
+            var span = technical[index];
+            var value = original.Substring(span.Start, span.Length);
+            var found = corrected.IndexOf(value, cursor, StringComparison.Ordinal);
+            if (found < 0) return null;
+            earliest[index] = found;
+            cursor = found + span.Length;
+        }
+
+        cursor = corrected.Length;
+        for (var index = technical.Count - 1; index >= 0; index--)
+        {
+            var span = technical[index];
+            var value = original.Substring(span.Start, span.Length);
+            var found = corrected.AsSpan(0, cursor).LastIndexOf(value.AsSpan(), StringComparison.Ordinal);
+            // Earliest and latest ordered mappings agree exactly, otherwise identity is ambiguous.
+            if (found != earliest[index]) return null;
+            anchors.Add(new FrozenAnchor(span, new TextSpan(found, span.Length)));
+            cursor = found;
+        }
+
+        var merged = new List<FrozenAnchor>();
+        foreach (var anchor in anchors.OrderBy(item => item.Before.Start).ThenBy(item => item.Before.End))
+        {
+            if (merged.Count == 0)
+            {
+                merged.Add(anchor);
+                continue;
+            }
+            var previous = merged[^1];
+            if (anchor.Before.Start >= previous.Before.End)
+            {
+                if (anchor.After.Start < previous.After.End) return null;
+                merged.Add(anchor);
+            }
+            else
+            {
+                // Overlapping structural and technical anchors must describe the same bytes.
+                if (anchor.After.Start - previous.After.Start != anchor.Before.Start - previous.Before.Start) return null;
+                var length = Math.Max(previous.Before.End, anchor.Before.End) - previous.Before.Start;
+                merged[^1] = new FrozenAnchor(new TextSpan(previous.Before.Start, length), new TextSpan(previous.After.Start, length));
+            }
+        }
+        var beforeBoundaries = StringInfo.ParseCombiningCharacters(original).Append(original.Length).ToHashSet();
+        var afterBoundaries = StringInfo.ParseCombiningCharacters(corrected).Append(corrected.Length).ToHashSet();
+        return merged.All(anchor => beforeBoundaries.Contains(anchor.Before.Start) && beforeBoundaries.Contains(anchor.Before.End)
+            && afterBoundaries.Contains(anchor.After.Start) && afterBoundaries.Contains(anchor.After.End)) ? merged : null;
+    }
+
+    private static IReadOnlyList<TextSpan> GetStructureRanges(string text)
+    {
+        var ranges = new List<TextSpan>();
         foreach (var line in TextStructure.GetLines(text))
         {
             if (line.PrefixLength > 0)
@@ -148,7 +239,7 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
         var merged = new List<TextSpan>();
         foreach (var span in ranges.OrderBy(range => range.Start))
         {
-            if (merged.Count == 0 || span.Start > merged[^1].End)
+            if (merged.Count == 0 || span.Start >= merged[^1].End)
             {
                 merged.Add(span);
             }

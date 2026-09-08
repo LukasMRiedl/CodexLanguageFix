@@ -12,6 +12,8 @@ namespace CodexLanguageFix.Windows;
 
 public sealed class CodexComposerAccessor : IComposerAccessor
 {
+    private ComposerSnapshot? _lastAppliedEditor;
+    private ComposerEditPlan? _lastAppliedPlan;
     public string LastWriteStatus { get; private set; } = "not_attempted";
     public ComposerWriteResult? LastWriteResult { get; private set; }
     public string LastCaptureStatus { get; private set; } = "not_attempted";
@@ -226,7 +228,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 return Failed(current is null ? "refresh_unavailable" : "expected_text_mismatch");
             }
 
-            var plan = ComposerEditPlan.Create(expectedText, replacement);
+            var plan = _lastAppliedPlan is { } previous
+                && _lastAppliedEditor is { } previousEditor && previousEditor.SameEditor(current)
+                && previous.Corrected == expectedText && previous.Original == replacement
+                    ? previous.Reverse()
+                    : ComposerEditPlan.Create(expectedText, replacement);
             if (plan is null)
             {
                 return Failed("unsafe_edit_plan");
@@ -250,6 +256,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 LastWriteResult = LastWriteResult with { Status = LastWriteResult.Status + "_" + target.LastStatus };
             }
             LastWriteStatus = LastWriteResult.Status;
+            if (LastWriteResult.State == ComposerWriteState.Applied)
+            {
+                _lastAppliedEditor = current;
+                _lastAppliedPlan = plan;
+            }
             return LastWriteResult.State == ComposerWriteState.Applied;
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException
@@ -860,7 +871,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             }
             else
             {
-                var range = CreateVerifiedRange(start, expected);
+                var insertionAnchor = expected.Length == 0 ? ComposerTextRangeMapping.InsertionAnchor(before, start) : null;
+                if (expected.Length == 0 && insertionAnchor is null) return Fail("insertion_anchor_unavailable");
+                var selectionStart = insertionAnchor?.Start ?? start;
+                var anchorText = insertionAnchor is { } anchor ? before.Substring(anchor.Start, anchor.Length) : expected;
+                var range = CreateVerifiedRange(selectionStart, anchorText);
                 if (range is null) return Fail("range_unavailable");
                 if (!IsCurrentEditor) return Fail("invalid_identity");
                 if (Read() != before) return Fail("before_mismatch");
@@ -871,13 +886,18 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 caret.MoveEndpointByRange(TextPatternRangeEndpoint.End, caret, TextPatternRangeEndpoint.Start);
                 caret.Select();
                 var textPattern = (TextPattern)element.GetCurrentPattern(TextPattern.Pattern);
-                var confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection(""));
+                var confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection("", selectionStart));
                 if (confirmation != ComposerSelectionCheck.Exact)
                     return Fail(ComposerSelectionVerification.Status(confirmation));
                 if (!IsCurrentEditor) return Fail("invalid_identity_after_selection");
                 if (Read() != before) return Fail("before_mismatch_after_selection");
-                if (!UnicodeInput.SelectFollowingText(expected)) return Fail("selection_sendinput_failed");
-                confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection(expected));
+                if (expected.Length == 0)
+                {
+                    if (selectionStart < start && !UnicodeInput.MoveFollowingText(anchorText))
+                        return Fail("caret_sendinput_failed");
+                }
+                else if (!UnicodeInput.SelectFollowingText(expected)) return Fail("selection_sendinput_failed");
+                confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection(expected, start));
                 if (confirmation != ComposerSelectionCheck.Exact)
                     return Fail(ComposerSelectionVerification.Status(confirmation));
                 if (!IsCurrentEditor) return Fail("invalid_identity_after_selection");
@@ -888,7 +908,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     return Fail("sendinput_failed");
                 }
 
-                ComposerSelectionCheck CheckSelection(string selectedText)
+                ComposerSelectionCheck CheckSelection(string selectedText, int selectedStart)
                 {
                     if (!IsCurrentEditor) return ComposerSelectionCheck.EditorChanged;
                     if (Read() != before) return ComposerSelectionCheck.SourceChanged;
@@ -909,7 +929,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                         var suffix = document.Clone();
                         suffix.MoveEndpointByRange(TextPatternRangeEndpoint.Start,
                             selection[0], TextPatternRangeEndpoint.End);
-                        if (!ComposerTextRangeMapping.MatchesSelection(before, start, selectedText,
+                        if (!ComposerTextRangeMapping.MatchesSelection(before, selectedStart, selectedText,
                             document.GetText(-1), prefix.GetText(-1), through.GetText(-1),
                             selection[0].GetText(-1), suffix.GetText(-1)))
                             result = ComposerSelectionCheck.TextMismatch;
@@ -1049,6 +1069,27 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         private const uint KeyEventUnicode = 0x0004;
         private const int InputKeyboard = 1;
         public static int StructSize => Marshal.SizeOf<INPUT>();
+
+        public static bool MoveFollowingText(string text)
+        {
+            var keys = CaretKeys(text);
+            if (keys.Length == 0 || !ModifiersAreReleased()) return false;
+            var inputs = keys.Select(key => Key(key.Key, key.Flags)).ToArray();
+            var sent = SendInput((uint)inputs.Length, inputs, StructSize);
+            if (sent == inputs.Length) return true;
+            if (sent % 2 != 0)
+            {
+                var release = new[] { Key(0x27, 0x0001 | KeyEventKeyUp) };
+                _ = SendInput(1, release, StructSize);
+            }
+            return false;
+        }
+
+        internal static (ushort Key, uint Flags)[] CaretKeys(string text)
+        {
+            var selection = SelectionKeys(text);
+            return selection.Length == 0 ? [] : selection[1..^1];
+        }
 
         public static bool SelectFollowingText(string text)
         {

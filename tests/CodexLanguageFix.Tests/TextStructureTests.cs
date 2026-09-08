@@ -8,6 +8,43 @@ namespace CodexLanguageFix.Tests;
 public sealed class TextStructureTests
 {
     [Theory]
+    [InlineData("  Das ist korekt.  ", "Das ist korrekt.", "  Das ist korrekt.  ")]
+    [InlineData("Das ist korekt.", "  Das ist korrekt.\t", "Das ist korrekt.")]
+    [InlineData("\t- korekt  \r\n\r\n  - Zweiter\t\r\n", "- korrekt\n- Zweiter", "\t- korrekt  \r\n\r\n  - Zweiter\t\r\n")]
+    [InlineData("Erster\r\n \t\r\nZweiter\r\n", "\nErster\n\n\nZweiter\n\n", "Erster\r\n \t\r\nZweiter\r\n")]
+    [InlineData("  > - [ ] korekt  \n", ">   -  [ ] korrekt", "  > - [ ] korrekt  \n")]
+    [InlineData("1. korekt\r2. Zweiter", "  1. korrekt\r\n  2. Zweiter", "1. korrekt\r2. Zweiter")]
+    [InlineData("\u00a0Grüße 🙂\t", "Grüße 🙂", "\u00a0Grüße 🙂\t")]
+    [InlineData("- \n", " -  ", "- \n")]
+    public void RestoresOnlyOriginalWhitespaceLayout(string original, string corrected, string expected)
+    {
+        Assert.True(TextStructure.TryRestoreLayout(original, corrected, out var restored));
+        Assert.Equal(expected, restored);
+        Assert.True(TextStructure.IsPreserved(original, restored));
+    }
+
+    [Theory]
+    [InlineData("Text", "")]
+    [InlineData("Text", " \r\n\t")]
+    [InlineData("Erster\nZweiter", "Erster Zweiter")]
+    [InlineData("Erster Zweiter", "Erster\nZweiter")]
+    [InlineData("Erster\nZweiter", "Erster\n")]
+    [InlineData("- Punkt\n- Zweiter", "Punkt\n- Zweiter")]
+    [InlineData("• Punkt", "- Punkt")]
+    [InlineData("1. Punkt", "2. Punkt")]
+    [InlineData("1. Punkt", "1) Punkt")]
+    [InlineData("- [ ] Punkt", "- [x] Punkt")]
+    [InlineData("> ## Titel", "## Titel")]
+    [InlineData("Text", "- Text")]
+    [InlineData("- Text", "- ")]
+    [InlineData("- \n", "\n")]
+    public void LayoutRestorationCannotHideMissingContentOrChangedStructure(string original, string corrected)
+    {
+        Assert.False(TextStructure.TryRestoreLayout(original, corrected, out var restored));
+        Assert.Empty(restored);
+    }
+
+    [Theory]
     [InlineData("Text\n\nAbsatz", "Text Absatz")]
     [InlineData("Text\r\nAbsatz", "Text\nAbsatz")]
     [InlineData("Text\rAbsatz", "Text\nAbsatz")]

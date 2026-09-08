@@ -5,6 +5,29 @@ namespace CodexLanguageFix.Tests;
 public sealed class NativeSelectionInputTests
 {
     [Theory]
+    [InlineData("x", 1)]
+    [InlineData("🙂", 1)]
+    [InlineData("a\u0308", 1)]
+    [InlineData("abc", 3)]
+    public void InsertionCaretMovesWithoutSelectingOrWriting(string text, int count)
+    {
+        var keys = NativeInput.CaretKeys(text);
+        Assert.Equal(count * 2, keys.Length);
+        Assert.All(keys, key => Assert.Equal((ushort)0x27, key.Key));
+        for (var index = 0; index < count; index++)
+        {
+            Assert.Equal(1u, keys[index * 2].Flags);
+            Assert.Equal(3u, keys[index * 2 + 1].Flags);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\r\n")]
+    [InlineData("\ufffc")]
+    public void InsertionCaretDoesNotCrossBreaksOrObjects(string text) => Assert.Empty(NativeInput.CaretKeys(text));
+
+    [Theory]
     [InlineData("abc", 3)]
     [InlineData("🙂", 1)]
     [InlineData("a\u0308", 1)]

@@ -7,6 +7,81 @@ namespace CodexLanguageFix.Tests;
 
 public sealed class LunaCorrectionProviderTests
 {
+    [Theory]
+    [InlineData("full", false)]
+    [InlineData("segments", false)]
+    [InlineData("spans", false)]
+    [InlineData("full", true)]
+    [InlineData("segments", true)]
+    [InlineData("spans", true)]
+    public async Task CorrectAsync_RestoresLayoutBeforeCountingAndCachingForEveryProtocol(string protocol, bool whitespaceOnly)
+    {
+        const string original = "  korekt  ";
+        var output = whitespaceOnly ? "korekt" : "korrekt";
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new { corrected_text = output }))
+        {
+            StructuredResponse = _ => protocol == "spans"
+                ? JsonSerializer.Serialize(new { edits = new[] { new { start = 0, length = original.Length, text = output } } })
+                : JsonSerializer.Serialize(new { changes = new[] { new { id = 0, text = output } } })
+        };
+        var outputProtocol = protocol switch
+        {
+            "segments" => LunaOutputProtocol.Segments,
+            "spans" => LunaOutputProtocol.SpanEdits,
+            _ => LunaOutputProtocol.FullText
+        };
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"), true, 0,
+            outputProtocol, fallbackEnabled: false);
+
+        var first = await provider.CorrectAsync(original, CancellationToken.None);
+        var cached = await provider.CorrectAsync(original, CancellationToken.None);
+
+        Assert.Equal("  " + output + "  ", first.CorrectedText);
+        Assert.Equal(whitespaceOnly ? 0 : 1, first.ChangeCount);
+        Assert.Equal(first.CorrectedText, cached.CorrectedText);
+        Assert.Equal(first.ChangeCount, cached.ChangeCount);
+        Assert.Equal(first.ChangeCount, first.LunaExecution!.ChangeCount);
+        Assert.Equal(1, client.RunCount + client.StructuredRunCount);
+        Assert.Equal(protocol == "full" ? 1 : 0, client.RunCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_RestoresParagraphWhitespaceAndLineEndingsLocally()
+    {
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new
+        {
+            corrected_text = "- korrekt\n- Zweiter"
+        }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        var result = await provider.CorrectAsync("  - korekt  \r\n \t\r\n- Zweiter\r\n", CancellationToken.None);
+
+        Assert.Equal("  - korrekt  \r\n \t\r\n- Zweiter\r\n", result.CorrectedText);
+        Assert.Equal(1, result.ChangeCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_LayoutRecoveryCannotRestoreInvalidControlCharacters()
+    {
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new { corrected_text = "Text" }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        await Assert.ThrowsAsync<LanguageFixException>(() => provider.CorrectAsync("\vText", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CorrectAsync_LayoutRecoveryCannotHidePlaceholderMutation()
+    {
+        var client = new FakeClient(text => JsonSerializer.Serialize(new
+        {
+            corrected_text = text.Trim().Replace("⟦", string.Empty, StringComparison.Ordinal)
+        }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        await Assert.ThrowsAsync<LanguageFixException>(() =>
+            provider.CorrectAsync("  Use `protected` and bad prose.  ", CancellationToken.None));
+    }
+
     [Fact]
     public async Task CorrectAsync_AppliesStructuredCorrectionAndRestoresProtectedContent()
     {
