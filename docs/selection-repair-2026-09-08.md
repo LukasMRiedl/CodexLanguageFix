@@ -30,7 +30,7 @@ Das Luna-Produktionsprofil und die Anbieterwahl wurden nicht geändert.
 ## Prüfung und Auslieferung
 
 Build: keine Warnungen oder Fehler. 306 Offline-Tests bestanden
-(`offline-final.trx`). Die neuen Tests decken auch falsche Auswahlpositionen,
+(`offline-final.trx`, nach Installation erneut `offline-after-install.trx`). Die neuen Tests decken auch falsche Auswahlpositionen,
 identische Textstellen, CRLF, Unicode-Grapheme, Modifier und partielle
 Auswahltasten-Batches ab.
 
@@ -45,7 +45,25 @@ Echte native Tests im normalen Chat, jeweils mit exaktem Rückgängig:
 
 Die fehlgeschlagenen Zwischenberichte bleiben zur Ursachenklärung erhalten;
 sie sind nicht die Ergebnisse des abschließenden reparierten Standes.
-Die lokale Installation und der anschließende echte Klicklauf stehen noch aus.
+Die lokale Installation wurde auf `1.3.1-rc.3` aktualisiert und neu gestartet.
+Der Paketstand stammt aus Commit `be129f9c438aec2d658aced6106ea05a937ee776`.
+
+- Installierte Datei:
+  `C:\Users\lukas\.codex\.chatgpt-projects\g-p-6a60c6d22cb88191be272153223ad7f6\dist\CodexLanguageFix\CodexLanguageFix.exe`.
+- Paket: `artifacts/selection-repair/release-1.3.1-rc.3/CodexLanguageFix.exe`.
+- Paket und installierte Datei sind identisch: SHA-256
+  `F6E94A8512FD5B3A0EE1EE755D8A2DA4A9D20B33425598D49C8FBD7F8F1D0D28`.
+- Die vorherige RC2 ist unter
+  `artifacts/selection-repair/installed-backup-1.3.1-rc.2.exe` gesichert;
+  SHA-256 `BA745291950D8013E886A9AD61CA495B71A67F07E84DAD9901E05B5C84224A49`.
+- Echter Mausklick auf `Aa` der installierten RC3, Luna-Korrektur der eigenen
+  Absatz-/Listenfixture und exaktes Rückgängig: bestanden, rund fünf Sekunden
+  für den gesamten Test (`installed-rc3-luna-rich-list.trx`). Das Produktionslog
+  bestätigt `composer_write_completed` und `composer_undo_completed`.
+
+Der Test sendete keine Chatnachricht ab und veränderte keine fremden Entwürfe.
+GitHub wurde in dieser Reparatur nicht veröffentlicht; die lokale Installation
+ist aktualisiert, nicht jedoch ein öffentlicher Release.
 Lokale Einzelberichte liegen unter `artifacts/selection-repair/`.
 Die offenen Oberflächenbereiche aus dem [vorherigen Prüfbericht](format-repair-2026-09-08.md)
 bleiben ausdrücklich ungeprüft; diese Reparatur ist keine vollständige stabile

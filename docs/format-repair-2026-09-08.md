@@ -1,6 +1,6 @@
 # Format- und Composer-Reparatur: Prüfstand vom 8. September 2026
 
-Status: Release-Kandidat 1.3.1-rc.2, lokal installiert und mit echtem Klick geprüft; noch keine vollständige stabile Abnahme oder GitHub-Veröffentlichung.
+Historischer Prüfstand: Release-Kandidat 1.3.1-rc.2. Die lokale Installation wurde anschließend durch [RC3 mit reparierter Auswahlprüfung](selection-repair-2026-09-08.md) ersetzt. Dieser Bericht bewahrt die damaligen Ergebnisse und offenen Abnahmepunkte; eine vollständige stabile Abnahme oder GitHub-Veröffentlichung wird nicht behauptet.
 
 ## Implementiert
 
