@@ -1,6 +1,6 @@
 # Format- und Composer-Reparatur: Prüfstand vom 8. September 2026
 
-Status: Release-Kandidat 1.3.1-rc.2, mehrere echte Oberflächenabläufe bestanden; noch keine vollständige Abnahme oder Auslieferung.
+Status: Release-Kandidat 1.3.1-rc.2, lokal installiert und mit echtem Klick geprüft; noch keine vollständige stabile Abnahme oder GitHub-Veröffentlichung.
 
 ## Implementiert
 
@@ -14,10 +14,10 @@ Status: Release-Kandidat 1.3.1-rc.2, mehrere echte Oberflächenabläufe bestande
 
 ## Automatisch verifiziert
 
-- Aktueller expliziter Offline-Lauf mit ausgeschlossenen Live-Einstiegspunkten: 229 Tests bestanden, Build ohne Warnungen oder Fehler. Bericht: `test-results/offline-noactivate-20260908/offline.trx`.
+- Aktueller expliziter Offline-Lauf mit ausgeschlossenen Live-Einstiegspunkten: 229 Tests bestanden, Build ohne Warnungen oder Fehler. Bericht: `artifacts/format-repair/final-offline-20260908/offline-final.trx`.
 - Echter Luna-Produktions-Smoke-Test mit OAuth, technischer Erhaltung und unverändertem Profil: bestanden.
-- Zwölf feste Formatfälle je echtem Anbieter (24 Korrekturen insgesamt): sämtliche exakten Ausgaben und Strukturprüfungen bestanden. Gesamter Formatlauf rund 73 Sekunden. Kein Composer wurde durch diesen Providerlauf beschrieben.
-- Ein erneuter abschließender Providerlauf ist noch in Prüfung; dessen Ergebnis wird erst nach Abschluss übernommen.
+- Zwölf feste Formatfälle je echtem Anbieter (24 Korrekturen insgesamt): sämtliche exakten Ausgaben und Strukturprüfungen bestanden. Abschließender echter Formatlauf rund 74 Sekunden; Bericht: `artifacts/format-repair/providers-format-interactive.trx`. Kein Composer wurde durch diesen Providerlauf beschrieben.
+- Ein vorheriger isolierter Agentenlauf hatte weder eine verwendbare OAuth-Sitzung noch den nötigen Netzwerkzugriff und ist keine gültige Providermessung. Der abschließende Lauf mit freigegebenem Zugriff bestand alle 24 Korrekturen.
 - Fälle: LF-/CRLF-Absätze, Stichpunkte, verschachtelte Listen, Nummerierung, Checkboxen, Markdown-Zeilenumbrüche, technische Spannen sowie vier unveränderte Kontrollen mit Unicode, Zitat, Code und abschließenden Leerzeilen.
 - Künstliche Schreibziele prüfen Auswahlausfall, Fehler vor/nach Schreibschritten, Ausnahme nach bereits erfolgtem Schreiben, Fokusverlust, Nutzereingaben, falsche Editoridentität, Rücknahme und Texte bis 20.000 Zeichen.
 - Geometrieprüfungen decken belegte Werkzeugleisten, Platzmangel, negative Monitorpositionen und Skalierungen von 100 bis 200 Prozent ab. WPF-Tests prüfen konstante Knopfgröße, separate Statusanzeige und getrennte Aktionen ohne Fokusübernahme.
@@ -50,6 +50,17 @@ Weitere vorübergehende Schreibablehnungen entstanden durch die Abbildung native
 
 Weitere UIA-Invoke-Fehlläufe hatten eine diagnostisch belegte Ursache im Prüfinstrument: Der programmatische Aufruf aktivierte das eigene Overlay-HWND und veränderte dadurch den Fokus vor der Editorprüfung. Die nachfolgenden Tests mit echten Mausklicks bestanden einschließlich exakter Wiederherstellung. Diese Instrumentenfehler werden nicht als Fehlschlag der inzwischen erfolgreich geprüften Klickabläufe gewertet.
 
+## Lokale Installation verifiziert
+
+Die tatsächliche Installation wurde auf `1.3.1-rc.2` aktualisiert. Sie stammt aus Commit `150e3f7396baa50767d051e56d418c66d46da79f`; die Produktversion enthält `1.3.1-rc.2+` und diesen Commit-Hash.
+
+- Installierte Datei: `C:\Users\lukas\.codex\.chatgpt-projects\g-p-6a60c6d22cb88191be272153223ad7f6\dist\CodexLanguageFix\CodexLanguageFix.exe`.
+- Die EXE im Paket und die installierte EXE sind hashgleich: SHA-256 `BA745291950D8013E886A9AD61CA495B71A67F07E84DAD9901E05B5C84224A49`.
+- Die vorherige Version 1.3.0 wurde unter `artifacts/format-repair/installed-backup-1.3.0.exe` gesichert; SHA-256 `1993B89749B9F1B135CA2C01080C07883E02D190D9AAF6579030049281559683`.
+- Ein echter Klick-Smoke-Test der installierten RC2-Version bestand; rund drei Sekunden. Bericht: `artifacts/format-repair/installed-rc2-real-click-smoke.trx`.
+
+Diese lokale Aktualisierung ist abgeschlossen. Die nachstehenden Einschränkungen und die ausstehende Veröffentlichung bleiben davon unberührt.
+
 ## Noch offen
 
 - Editdialoge echter bereits abgesendeter historischer Nachrichten sind noch nicht geprüft; die dafür notwendige Freigabe wurde angefragt.
@@ -57,6 +68,6 @@ Weitere UIA-Invoke-Fehlläufe hatten eine diagnostisch belegte Ursache im Prüfi
 - In einer engen Work-Ansicht mit überlagerndem Gesprächsverlauf kann die konservative Kollisionsprüfung den Knopf weiterhin ausblenden. Damit ist die Positionierung über alle schmalen und breiten Ansichten noch nicht vollständig abgenommen.
 - Die reale Platzierung des separaten Status-Popups an Bildschirmrändern ist noch zu prüfen. Windows kann das Popup dort versetzen.
 - UIA unterscheidet leere Eingabefelder mit Platzhaltertext noch nicht in allen Fällen zuverlässig; der `Aa`-Knopf kann dort sichtbar bleiben.
-- Die aktuelle lokale RC-Testinstanz ist `ui15`. Die Aktualisierung der ursprünglichen Installation auf RC2 mit Sicherung ist vorgesehen, aber noch nicht als erfolgt verifiziert. Die GitHub-Veröffentlichung ist weiterhin ausstehend und blockiert.
+- RC2 ist noch nicht auf GitHub veröffentlicht.
 
-Vor einem stabilen Release und dem abschließenden Ersatz der Installation müssen die verbleibenden Oberflächenprüfungen abgeschlossen oder ausdrücklich als ungeprüft ausgewiesen werden. Anschließend sind Versions- und Hashabgleich zwischen installierter und veröffentlichter Datei sowie der GitHub-Download zu prüfen. Die Reparatur ist derzeit nicht als vollständig ausgeliefert abgenommen.
+Vor einem stabilen Release müssen die verbleibenden Oberflächenprüfungen abgeschlossen oder ausdrücklich als ungeprüft ausgewiesen werden. Nach einer Veröffentlichung sind die GitHub-Datei und der Download gegen den installierten Build abzugleichen. Eine vollständige stabile Abnahme wird weiterhin nicht behauptet.
