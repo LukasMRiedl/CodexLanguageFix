@@ -18,6 +18,8 @@ public partial class OverlayWindow : Window
     private bool _lastStatusCanUndo;
     private bool _statusVisible;
     private readonly AppLocalizer _localizer;
+    private HwndSource? _overlaySource;
+    private HwndSource? _statusPopupSource;
 
     internal int StatusStateChangeCount { get; private set; }
 
@@ -30,6 +32,7 @@ public partial class OverlayWindow : Window
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
         StartBusyAnimation();
         SourceInitialized += (_, _) => ApplyNoActivateStyle();
+        StatusPopup.Opened += (_, _) => ApplyPopupNoActivateStyle();
         IsVisibleChanged += (_, _) => StatusPopup.IsOpen = IsVisible && _statusVisible;
     }
 
@@ -244,6 +247,10 @@ public partial class OverlayWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         StatusPopup.IsOpen = false;
+        if (_overlaySource is { IsDisposed: false }) _overlaySource.RemoveHook(NoActivateHook);
+        if (_statusPopupSource is { IsDisposed: false }) _statusPopupSource.RemoveHook(NoActivateHook);
+        _overlaySource = null;
+        _statusPopupSource = null;
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         base.OnClosed(e);
     }
@@ -254,8 +261,34 @@ public partial class OverlayWindow : Window
     private void ApplyNoActivateStyle()
     {
         var handle = new WindowInteropHelper(this).Handle;
+        _overlaySource = HwndSource.FromHwnd(handle);
+        _overlaySource?.AddHook(NoActivateHook);
+        ApplyNoActivateStyle(handle);
+    }
+
+    private void ApplyPopupNoActivateStyle()
+    {
+        if (PresentationSource.FromVisual(StatusPill) is not HwndSource source) return;
+        if (!ReferenceEquals(_statusPopupSource, source))
+        {
+            if (_statusPopupSource is { IsDisposed: false }) _statusPopupSource.RemoveHook(NoActivateHook);
+            _statusPopupSource = source;
+            source.AddHook(NoActivateHook);
+        }
+        ApplyNoActivateStyle(source.Handle);
+    }
+
+    private static void ApplyNoActivateStyle(nint handle)
+    {
         var current = GetWindowLongPtr(handle, ExtendedStyleIndex).ToInt64();
         SetWindowLongPtr(handle, ExtendedStyleIndex, new nint(current | ExNoActivate | ExToolWindow));
+    }
+
+    internal static nint NoActivateHook(nint window, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (message != 0x0021) return nint.Zero; // WM_MOUSEACTIVATE
+        handled = true;
+        return new nint(3); // MA_NOACTIVATE: Klick verarbeiten, Fenster nicht aktivieren.
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]

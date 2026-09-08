@@ -98,6 +98,62 @@ public sealed class CodexComposerShapeTests
     }
 
     [Fact]
+    public void SearchRenameAndOtherWritableInputsBlockComposerFallback()
+    {
+        foreach (var className in new[] { "search-input", "rename-input", "terminal-input", "TextBox" })
+        {
+            Assert.True(CodexComposerAccessor.IsTextInputForFocusGuard(
+                ControlType.Edit, className, "", hasWritableValue: false));
+            Assert.False(CodexComposerAccessor.IsSupportedComposerShape(ControlType.Edit, className, ""));
+        }
+
+        Assert.True(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.ComboBox, "editable-search", "", hasWritableValue: true));
+        Assert.True(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.Custom, "", "", hasWritableValue: true));
+    }
+
+    [Fact]
+    public void RootWebAreaAndToolbarControlsStillAllowComposerFallback()
+    {
+        Assert.False(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.Document, "", "RootWebArea", hasWritableValue: false));
+        Assert.False(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.Button, "", "", hasWritableValue: false));
+        Assert.False(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.ComboBox, "settings-dropdown", "ModelSelector", hasWritableValue: false));
+        Assert.True(CodexComposerAccessor.IsTextInputForFocusGuard(
+            ControlType.Group, "ProseMirror", "", hasWritableValue: false));
+    }
+
+    [Fact]
+    public void FocusableDocumentContainerDoesNotBlockToolbarButEditorsAndTextDo()
+    {
+        Assert.False(CodexComposerAccessor.IsToolbarObstacle(ControlType.Document, "", "RootWebArea"));
+        Assert.False(CodexComposerAccessor.IsToolbarObstacle(ControlType.Document, "", ""));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Document, "ProseMirror", ""));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Edit, "ProseMirror", ""));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Text, "", ""));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Button, "", ""));
+    }
+
+    [Fact]
+    public void OnlyVerifiedContainerAncestorsAreExcludedFromOccupiedBounds()
+    {
+        foreach (var container in new[] { ControlType.Group, ControlType.Pane, ControlType.Window, ControlType.Custom })
+        {
+            Assert.False(CodexComposerAccessor.IsToolbarObstacle(container, "", "", isEditorAncestor: true));
+            Assert.True(CodexComposerAccessor.IsToolbarObstacle(container, "", "", isEditorAncestor: false));
+        }
+
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Group, "ProseMirror", "", isEditorAncestor: true));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Text, "", "", isEditorAncestor: true));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Button, "", "", isEditorAncestor: true));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.ComboBox, "", "", isEditorAncestor: true));
+        Assert.True(CodexComposerAccessor.IsToolbarObstacle(ControlType.Edit, "", "", isEditorAncestor: true));
+    }
+
+    [Fact]
     public void ComposerAutomationIdAloneDoesNotQualifyUnverifiedTextBox()
     {
         Assert.False(CodexComposerAccessor.IsSupportedComposerShape(

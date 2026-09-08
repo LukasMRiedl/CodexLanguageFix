@@ -10,7 +10,7 @@ internal static class OverlayPlacement
         if (composer.IsEmpty || editor.IsEmpty || screen.IsEmpty || !double.IsFinite(scale) || scale <= 0)
             return null;
 
-        var size = 36 * scale;
+        var size = 28 * scale;
         var gap = 4 * scale;
         var available = Rect.Intersect(composer, screen);
         if (available.IsEmpty || available.Width < size || available.Height < size)

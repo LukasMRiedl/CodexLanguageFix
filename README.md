@@ -6,7 +6,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source contains the **1.3.1 release candidate** for format-safe insertion and overlay placement. Automated format checks passed for both providers; real-host UI acceptance is still open. See [repair verification](docs/format-repair-2026-09-08.md). It is not yet a fully accepted stable release.
+The current source contains **release candidate 1.3.1-rc.2** for format-preserving insertion and overlay placement. All 229 offline tests and the previous format checks for both providers passed. Real-click tests in normal chat, Plan, and Antigravity, plus a Work roundtrip, confirmed correction and exact undo. Historical message edit dialogs, mixed-DPI monitors, and screen-edge cases remain unverified; the button may hide in narrow overlapping layouts or remain visible in empty placeholder fields. See [repair verification](docs/format-repair-2026-09-08.md). Local installation and GitHub publication are not yet confirmed complete; this is not a fully accepted stable release.
 
 ## Features
 
@@ -46,7 +46,7 @@ The published executable is currently not code-signed. Windows may therefore dis
 
 Only after you click the correction button does the app send the current prompt to the selected provider. LanguageTool requests go over HTTPS to `https://api.languagetool.org/v2/check`. Luna requests use ChatGPT OAuth through the official Codex App Server; the app has no API-key path. Production uses the qualified `baseline / none / full-v1` profile in an ephemeral `gpt-5.6-luna` thread with Fast mode, a read-only/no-network sandbox, and explicit instructions prohibiting tools. The App Server and one empty single-use thread may be prepared without composer content, but no correction or local draft starts while you type. Segment and span-edit protocols as well as `low` and `medium` reasoning remain disabled. Technical spans are replaced locally with random placeholders before Luna sees the text and restored only after strict validation.
 
-Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never logged. Up to 64 validated Luna results are cached only in memory and discarded when the app exits. Local diagnostic logs contain only technical metadata such as provider, timestamp, duration, status code, character count, and change count. They are deleted after seven days.
+Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never recorded in production logs. Up to 64 validated Luna results are cached only in memory and discarded when the app exits. Local diagnostic logs contain only technical metadata such as provider, timestamp, duration, status code, character count, and change count. They are deleted after seven days. Explicitly enabled UI diagnostics may output only pre-verified synthetic fixture data.
 
 See [PRIVACY.md](PRIVACY.md) for more information.
 

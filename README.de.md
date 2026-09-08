@@ -6,7 +6,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1** für formaterhaltendes Einsetzen und die Knopfpositionierung. Die automatischen Formatprüfungen beider Anbieter sind bestanden; die Abnahme in den echten Eingabefeldern ist noch offen. Siehe [Prüfbericht](docs/format-repair-2026-09-08.md). Es ist noch kein vollständig abgenommener stabiler Release.
+Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1-rc.2** für formaterhaltendes Einsetzen und die Knopfpositionierung. 229 Offline-Tests und die bisherigen Formatprüfungen beider Anbieter sind bestanden. Echte Klicktests in normalem Chat, Plan und Antigravity sowie ein Work-Ablauf bestätigten Korrektur und exaktes Rückgängigmachen. Historische Nachrichten-Editdialoge, gemischte DPI-Werte und Bildschirmrandfälle bleiben offen; in engen überlagerten Ansichten kann der Knopf ausgeblendet werden, bei leeren Platzhalterfeldern dagegen sichtbar bleiben. Siehe [Prüfbericht](docs/format-repair-2026-09-08.md). Die lokale Aktualisierung und GitHub-Veröffentlichung sind noch nicht als abgeschlossen bestätigt; dies ist kein vollständig abgenommener stabiler Release.
 
 ## Funktionen
 
@@ -46,7 +46,7 @@ Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb be
 
 Erst nach einem Klick sendet die App den aktuellen Prompt an den ausgewählten Anbieter. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna verwendet ChatGPT-OAuth über den offiziellen Codex App Server; einen API-Schlüssel-Pfad gibt es nicht. Die Produktion nutzt das qualifizierte Profil `baseline / none / full-v1` in einem ephemeren `gpt-5.6-luna`-Thread mit Fast Mode, einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Der App Server und ein leerer Einmal-Thread dürfen ohne Composer-Inhalt vorbereitet werden; während des Tippens startet weder eine Korrektur noch ein lokaler Vorabentwurf. Segment- und Span-Protokolle sowie `low` und `medium` bleiben deaktiviert. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
 
-Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden niemals protokolliert. Bis zu 64 bereits validierte Luna-Ergebnisse werden ausschließlich im Arbeitsspeicher zwischengespeichert und beim Beenden verworfen. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt.
+Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden in Produktionsprotokollen niemals aufgezeichnet. Bis zu 64 bereits validierte Luna-Ergebnisse werden ausschließlich im Arbeitsspeicher zwischengespeichert und beim Beenden verworfen. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt. Die ausdrücklich aktivierte Oberflächendiagnose kann ausschließlich vorab verifizierte künstliche Testdaten ausgeben.
 
 Weitere Einzelheiten stehen in [PRIVACY.md](PRIVACY.md).
 

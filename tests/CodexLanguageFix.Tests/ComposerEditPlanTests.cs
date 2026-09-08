@@ -100,6 +100,25 @@ public sealed class ComposerEditPlanTests
         Assert.Equal(plan.Original, target.Text);
     }
 
+    [Theory]
+    [InlineData(0, ComposerWriteState.Unchanged)]
+    [InlineData(1, ComposerWriteState.PartiallyApplied)]
+    public void PersistentReadFailureReportsPartialStateOnlyAfterAWriteAttempt(
+        int failureAfterWrites, ComposerWriteState expectedState)
+    {
+        var plan = TwoChanges();
+        var target = new MemoryTarget(plan.Original) { ReadFailureAfterWrites = failureAfterWrites };
+
+        var result = ComposerWriteTransaction.Apply(plan, target);
+
+        Assert.Equal(expectedState, result.State);
+        Assert.Equal(failureAfterWrites, target.WriteCalls);
+        Assert.Equal(plan.Original, result.OriginalText);
+        Assert.Null(result.ObservedText);
+        if (failureAfterWrites == 0) Assert.Equal(plan.Original, target.Text);
+        else Assert.NotEqual(plan.Original, target.Text);
+    }
+
     [Fact]
     public void UserChangesDuringWriteArePreservedAndOriginalRemainsAvailable()
     {
@@ -145,8 +164,11 @@ public sealed class ComposerEditPlanTests
         public int? ThrowAfterWrite { get; init; }
         public int? UserChangeAfterWrite { get; init; }
         public int? LoseFocusAfterWrite { get; init; }
+        public int? ReadFailureAfterWrites { get; init; }
         public int WriteCalls { get; private set; }
-        public string? Read() => Text;
+        public string? Read() => ReadFailureAfterWrites is { } failureAfterWrites && WriteCalls >= failureAfterWrites
+            ? throw new InvalidOperationException("Editor text is unavailable.")
+            : Text;
         public bool CanReplace(int start, string expected) => start != InvalidSelection
             && Text.AsSpan(start, expected.Length).SequenceEqual(expected);
         public bool Replace(int start, string expected, string replacement)

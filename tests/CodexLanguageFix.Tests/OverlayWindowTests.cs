@@ -5,6 +5,25 @@ namespace CodexLanguageFix.Tests;
 
 public sealed class OverlayWindowTests
 {
+    [Fact]
+    public void OwnWindowMouseActivationIsSuppressedWithoutDiscardingTheClick()
+    {
+        var handled = false;
+        Assert.Equal(new nint(3), OverlayWindow.NoActivateHook(0, 0x0021, 0, 0, ref handled));
+        Assert.True(handled);
+    }
+
+    [Theory]
+    [InlineData(0x0006)]
+    [InlineData(0x0201)]
+    [InlineData(0x0202)]
+    public void OtherWindowMessagesAreNotIntercepted(int message)
+    {
+        var handled = false;
+        Assert.Equal(nint.Zero, OverlayWindow.NoActivateHook(0, message, 0, 0, ref handled));
+        Assert.False(handled);
+    }
+
     [Theory]
     [InlineData("de", 1, "1 Änderung")]
     [InlineData("de", 2, "2 Änderungen")]
@@ -37,17 +56,17 @@ public sealed class OverlayWindowTests
                 overlay.CorrectRequested += (_, _) => correctionRequests++;
                 overlay.UndoRequested += (_, _) => undoRequests++;
                 overlay.ShowStatus(null);
-                Assert.Equal(36, overlay.Width);
-                Assert.Equal(36, overlay.Height);
+                Assert.Equal(28, overlay.Width);
+                Assert.Equal(28, overlay.Height);
                 Assert.False(overlay.StatusPopup.IsOpen);
                 Assert.False(overlay.StatusPopup.Focusable);
                 Assert.False(overlay.CorrectButton.Focusable);
                 Assert.False(overlay.UndoButton.Focusable);
 
                 overlay.ShowStatus("2 Änderungen", canUndo: true);
-                Assert.Equal(36, overlay.Width);
+                Assert.Equal(28, overlay.Width);
                 Assert.Same(overlay.CorrectButton, overlay.StatusPopup.PlacementTarget);
-                Assert.Equal(36, overlay.Height);
+                Assert.Equal(28, overlay.Height);
                 Assert.Equal(15, overlay.StatusPill.Height);
                 Assert.Equal(13, overlay.UndoButton.Height);
 
@@ -62,7 +81,7 @@ public sealed class OverlayWindowTests
                 Assert.Equal(stateChanges, overlay.StatusStateChangeCount);
                 overlay.SetBusy(true);
                 Assert.Equal("2 Änderungen", overlay.StatusText.Text);
-                Assert.Equal(36, overlay.Width);
+                Assert.Equal(28, overlay.Width);
 
                 overlay.SetBusy(true);
                 Assert.Equal(System.Windows.Visibility.Visible, overlay.BusyGlyph.Visibility);
@@ -71,8 +90,8 @@ public sealed class OverlayWindowTests
                 Assert.Equal(System.Windows.Visibility.Collapsed, overlay.BusyGlyph.Visibility);
                 Assert.True(overlay.BusyRotation.HasAnimatedProperties);
                 overlay.ShowStatus(null);
-                Assert.Equal(36, overlay.Width);
-                Assert.Equal(36, overlay.Height);
+                Assert.Equal(28, overlay.Width);
+                Assert.Equal(28, overlay.Height);
                 Assert.Equal(0, correctionRequests);
                 Assert.Equal(0, undoRequests);
                 overlay.UndoButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
@@ -110,7 +129,7 @@ public sealed class OverlayWindowTests
         var screen = new System.Windows.Rect(-1600 * scale, 0, 1600 * scale, 1000 * scale);
         var bounds = OverlayPlacement.Find(composer, editor, [control], screen, scale, control);
         Assert.NotNull(bounds);
-        Assert.Equal(36 * scale, bounds.Value.Width);
+        Assert.Equal(28 * scale, bounds.Value.Width);
         Assert.True(composer.Contains(bounds.Value));
         Assert.True(screen.Contains(bounds.Value));
         Assert.False(editor.IntersectsWith(bounds.Value));
@@ -127,7 +146,7 @@ public sealed class OverlayWindowTests
         var placement = OverlayPlacement.Find(composer, editor, controls,
             new System.Windows.Rect(0, 0, 1920, 1080), 1, controls[1]);
         Assert.NotNull(placement);
-        Assert.InRange(placement.Value.Left, 500, 514);
+        Assert.InRange(placement.Value.Left, 500, 522);
         Assert.DoesNotContain(controls, r => r.IntersectsWith(placement.Value));
     }
 

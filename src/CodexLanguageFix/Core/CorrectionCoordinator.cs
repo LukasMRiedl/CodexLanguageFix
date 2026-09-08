@@ -26,6 +26,8 @@ public sealed class CorrectionCoordinator : IDisposable
     private ComposerSnapshot? _requestSnapshot;
     private string? _transientMessage;
     private DateTimeOffset _transientUntil;
+    private string? _lastCaptureDiagnostic;
+    private bool? _lastPlacementVisible;
 
     public CorrectionCoordinator(
         IComposerAccessor composerAccessor,
@@ -88,8 +90,9 @@ public sealed class CorrectionCoordinator : IDisposable
         }
 
         var snapshot = _composerAccessor.TryCaptureFocusedComposer();
-        if (snapshot is null)
+        if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
+            LogCaptureStatus();
             _visibleSnapshot = null;
             _requestCancellation?.Cancel();
             _overlay.Hide();
@@ -119,6 +122,7 @@ public sealed class CorrectionCoordinator : IDisposable
         }
 
         var snapshot = _composerAccessor.TryCaptureFocusedComposer();
+        LogCaptureStatus();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
             ShowTransient(_localizer.Get(AppText.NoPromptDetected));
@@ -135,6 +139,7 @@ public sealed class CorrectionCoordinator : IDisposable
         try
         {
             var provider = GetCurrentProvider();
+            _logger.Write("check_started", snapshot.Text.Length, provider: provider.Kind);
             var outcome = await provider.CorrectAsync(snapshot.Text, requestCancellation.Token);
             requestCancellation.Token.ThrowIfCancellationRequested();
             var active = _composerAccessor.TryCaptureFocusedComposer();
@@ -206,6 +211,7 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         catch (OperationCanceledException)
         {
+            _logger.Write("check_cancelled", snapshot.Text.Length);
             ShowTransient(_localizer.Get(AppText.CheckCancelled), snapshot);
         }
         catch (LanguageFixException exception)
@@ -253,11 +259,14 @@ public sealed class CorrectionCoordinator : IDisposable
 
         if (_composerAccessor.TryReplace(current, current.Text, _undo.Original))
         {
+            _logger.Write("composer_undo_completed", current.Text.Length);
             _undo = null;
             ShowTransient(_localizer.Get(AppText.UndoCompleted));
         }
         else
         {
+            var detail = _composerAccessor is CodexComposerAccessor accessor ? accessor.LastWriteStatus : "unknown";
+            _logger.Write($"composer_undo_rejected_{detail}", current.Text.Length);
             if (_composerAccessor.LastWriteResult?.State == ComposerWriteState.PartiallyApplied)
                 new RecoveryWindow(_undo.Original, _localizer).Show();
             ShowTransient(_localizer.Get(AppText.UndoFailed));
@@ -344,9 +353,26 @@ public sealed class CorrectionCoordinator : IDisposable
         RefreshOverlay();
     }
 
-    private void PositionOverlay(ComposerSnapshot snapshot) =>
+    private void PositionOverlay(ComposerSnapshot snapshot)
+    {
         _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host,
             snapshot.EditorBounds, snapshot.OccupiedBounds);
+        LogCaptureStatus();
+        if (_lastPlacementVisible != _overlay.IsVisible)
+        {
+            _lastPlacementVisible = _overlay.IsVisible;
+            _logger.Write(_overlay.IsVisible ? "overlay_placed" : "overlay_no_safe_space");
+        }
+    }
+
+    private void LogCaptureStatus()
+    {
+        if (_composerAccessor is CodexComposerAccessor accessor && _lastCaptureDiagnostic != accessor.LastCaptureStatus)
+        {
+            _lastCaptureDiagnostic = accessor.LastCaptureStatus;
+            _logger.Write($"composer_capture_{_lastCaptureDiagnostic}");
+        }
+    }
 
     internal static bool IsUnchangedEditor(ComposerSnapshot expected, ComposerSnapshot observed) =>
         expected.SameEditor(observed) && string.Equals(expected.Text, observed.Text, StringComparison.Ordinal);

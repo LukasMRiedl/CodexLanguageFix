@@ -236,7 +236,8 @@ internal static class ComposerWriteTransaction
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                return new ComposerWriteResult(ComposerWriteState.PartiallyApplied, plan.Original, null, applied.Count, status);
+                return new ComposerWriteResult(attemptedWrite ? ComposerWriteState.PartiallyApplied : ComposerWriteState.Unchanged,
+                    plan.Original, null, applied.Count, status);
             }
         }
     }
