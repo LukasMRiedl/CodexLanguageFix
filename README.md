@@ -6,7 +6,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source contains **release candidate 1.3.1-rc.2** for format-preserving insertion and overlay placement. All 229 offline tests and all 24 final live format checks across both providers passed. Real-click tests in normal chat, Plan, and Antigravity, plus a Work roundtrip, confirmed correction and exact undo. Historical message edit dialogs, mixed-DPI monitors, and screen-edge cases remain unverified; the button may hide in narrow overlapping layouts or remain visible in empty placeholder fields. See [repair verification](docs/format-repair-2026-09-08.md). The local installation was updated to RC2, hash-verified, and checked with a real-click smoke test. RC2 is not yet published on GitHub and is not a fully accepted stable release.
+The current source contains **release candidate 1.3.1-rc.3**, fixing repeated safe-insertion failures and native selections crossing real line breaks. All 306 offline tests passed. Real native roundtrips verified insertions, replacements, deletions, Unicode, trailing blank lines and rich lists with exact undo. See the [selection repair report](docs/selection-repair-2026-09-08.md) for installation and live-click verification, and the [earlier format report](docs/format-repair-2026-09-08.md) for previous provider checks. Historical message edit dialogs, mixed-DPI monitors and screen-edge cases remain unverified; narrow overlapping layouts and empty placeholder fields still have known placement limitations. RC3 is not yet published on GitHub and is not a fully accepted stable release.
 
 ## Features
 

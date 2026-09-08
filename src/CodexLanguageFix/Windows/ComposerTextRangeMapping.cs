@@ -11,6 +11,12 @@ internal static class ComposerTextRangeMapping
         && prefix.AsSpan().SequenceEqual(full.AsSpan(0, start))
         && rangeText == expected;
 
+    internal static bool MatchesSelection(string full, int start, string expected,
+        string documentText, string prefix, string through, string selectionText, string suffix) =>
+        documentText == full && Matches(full, start, expected, prefix, selectionText)
+        && through.AsSpan().SequenceEqual(full.AsSpan(0, start + expected.Length))
+        && suffix.AsSpan().SequenceEqual(full.AsSpan(start + expected.Length));
+
     internal static TextSpan? InsertionAnchor(string full, int start)
     {
         if (start < 0 || start > full.Length) return null;

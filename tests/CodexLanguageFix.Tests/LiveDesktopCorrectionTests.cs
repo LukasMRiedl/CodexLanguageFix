@@ -48,6 +48,41 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Codex);
     }
 
+    [Fact]
+    public void PreparedSyntheticEndInsertion_DirectNativeRoundTrip()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_END_INSERTION_TEST") != "1") return;
+        RunNativeRoundTrip([
+            new("Das ist ein Test", "Das ist ein Test."),
+            new("Das ist ein Test\n", "Das ist ein Test.\n"),
+            new("Das ist ein Test\r\n", "Das ist ein Test.\r\n")], ComposerHost.Codex);
+    }
+
+    [Fact]
+    public void PreparedSyntheticEndReplacement_DirectNativeRoundTrip()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_END_REPLACEMENT_TEST") != "1") return;
+        RunNativeRoundTrip([
+            new("Das ist ein Test", "Das ist ein Tesx"),
+            new("Das ist ein Test\n", "Das ist ein Tesx\n"),
+            new("Das ist ein Test\r\n", "Das ist ein Tesx\r\n")], ComposerHost.Codex);
+    }
+
+    [Fact]
+    public void PreparedSyntheticBoundaryMatrix_DirectNativeRoundTrips()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_BOUNDARY_MATRIX_TEST") != "1") return;
+        foreach (var corrected in new[] {
+            "das ist ein Test", "as ist ein Test", "🙂 Das ist ein Test",
+            "Das ist wirklich ein Test", "Das ist Test", "Das ist ein Tést",
+            "Das ist ein Test 🙂", "Das ist ein Tes", "Dies ist eine Prüfung" })
+        {
+            RunNativeRoundTrip((from suffix in new[] { "", "\n", "\r\n", "\n\n", "\r\n\r\n" }
+                select new PreparedFixture("Das ist ein Test" + suffix, corrected + suffix)).ToArray(),
+                ComposerHost.Codex);
+        }
+    }
+
     // Opt in with CODEX_LANGUAGE_FIX_DESKTOP_PARAGRAPH_LIVE_TEST=1 after preparing the exact paragraph/list fixture.
     [Fact]
     public void PreparedSyntheticParagraphList_IsCorrectedAndUndoneThroughOwnOverlay()
@@ -103,6 +138,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         var accessor = new CodexComposerAccessor();
         var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost);
         var originalText = original.Text;
+        output.WriteLine($"fixtureCharacters={originalText.Length}; lineBreaks={originalText.Count(c => c == '\n')}");
         var correctionStates = PlannedStates(originalText, correctedText);
         var undoStates = PlannedStates(correctedText, originalText);
 
@@ -187,13 +223,41 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         RunNativeRoundTrip(SentenceFixtures, ComposerHost.Antigravity);
     }
 
-    private static void RunNativeRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
+    private void RunNativeRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
     {
         var accessor = new CodexComposerAccessor();
         var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost);
         var originalText = original.Text;
+        output.WriteLine($"fixtureCharacters={originalText.Length}; lineBreaks={originalText.Count(c => c == '\n')}");
 
-        Assert.True(accessor.TryReplace(original, originalText, correctedText), accessor.LastWriteStatus);
+        var applied = accessor.TryReplace(original, originalText, correctedText);
+        if (!applied && original.NativeElement is AutomationElement native
+            && original.SameEditor(accessor.TryCaptureFocusedComposer())
+            && accessor.TryRefresh(original)?.Text == originalText)
+        {
+            var pattern = (TextPattern)native.GetCurrentPattern(TextPattern.Pattern);
+            foreach (var selected in pattern.GetSelection())
+            {
+                var prefix = pattern.DocumentRange.Clone();
+                prefix.MoveEndpointByRange(System.Windows.Automation.Text.TextPatternRangeEndpoint.End,
+                    selected, System.Windows.Automation.Text.TextPatternRangeEndpoint.Start);
+                var through = pattern.DocumentRange.Clone();
+                through.MoveEndpointByRange(System.Windows.Automation.Text.TextPatternRangeEndpoint.End,
+                    selected, System.Windows.Automation.Text.TextPatternRangeEndpoint.End);
+                var suffix = pattern.DocumentRange.Clone();
+                suffix.MoveEndpointByRange(System.Windows.Automation.Text.TextPatternRangeEndpoint.Start,
+                    selected, System.Windows.Automation.Text.TextPatternRangeEndpoint.End);
+                output.WriteLine(JsonSerializer.Serialize(new {
+                    selectionLength = selected.GetText(-1).Length,
+                    prefixLength = prefix.GetText(-1).Length,
+                    endPrefixLength = through.GetText(-1).Length,
+                    suffixLength = suffix.GetText(-1).Length,
+                    prefixIsWholeOriginal = prefix.GetText(-1) == originalText,
+                    endPrefixIsWholeOriginal = through.GetText(-1) == originalText
+                }));
+            }
+        }
+        Assert.True(applied, accessor.LastWriteStatus);
         var corrected = accessor.TryRefresh(original);
         Assert.True(original.SameEditor(corrected) && corrected!.Text == correctedText,
             "Die native Korrektur wurde nicht exakt im ursprünglichen Testeditor bestätigt.");

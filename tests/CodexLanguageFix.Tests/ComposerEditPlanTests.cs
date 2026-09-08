@@ -7,6 +7,48 @@ namespace CodexLanguageFix.Tests;
 public sealed class ComposerEditPlanTests
 {
     [Theory]
+    [InlineData("abc", "Xabc", 0, "a", "Xa")]
+    [InlineData("abc", "aXbc", 0, "a", "aX")]
+    [InlineData("Das ist ein Test", "Das ist ein Test.", 15, "t", "t.")]
+    [InlineData("Das ist ein Test\n", "Das ist ein Test.\n", 15, "t", "t.")]
+    [InlineData("a\r\nb", "a.\r\nb", 0, "a", "a.")]
+    [InlineData("a\r\nb", "a\r\nXb", 3, "b", "Xb")]
+    [InlineData("a\u0308", "a\u0308!", 0, "a\u0308", "a\u0308!")]
+    [InlineData("🙂", "🙂!", 0, "🙂", "🙂!")]
+    [InlineData("👩\u200d💻", "👩\u200d💻!", 0, "👩\u200d💻", "👩\u200d💻!")]
+    [InlineData("`x`abc", "`x`Xabc", 3, "a", "Xa")]
+    [InlineData("abc`x`", "abcd`x`", 2, "c", "cd")]
+    [InlineData("• abc\r\n", "• Xabc\r\n", 2, "a", "Xa")]
+    public void OneSidedEditsUseAnUnprotectedWholeGraphemeInBothDirections(
+        string original, string corrected, int start, string expectedOriginal, string expectedReplacement)
+    {
+        var plan = Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(original, corrected));
+        var edit = Assert.Single(plan.Edits);
+        Assert.Equal(new ComposerTextEdit(start, expectedOriginal, expectedReplacement), edit);
+        Assert.NotEmpty(edit.Original);
+        Assert.NotEmpty(edit.Replacement);
+
+        var reverse = Assert.IsType<ComposerEditPlan>(ComposerEditPlan.Create(corrected, original));
+        Assert.Equal(new ComposerTextEdit(start, expectedReplacement, expectedOriginal), Assert.Single(reverse.Edits));
+        var target = new MemoryTarget(original);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(plan, target).State);
+        Assert.Equal(corrected, target.Text);
+        Assert.Equal(ComposerWriteState.Applied, ComposerWriteTransaction.Apply(reverse, target).State);
+        Assert.Equal(original, target.Text);
+    }
+
+    [Theory]
+    [InlineData("Use `x`", "Use `x`.")]
+    [InlineData("Use `x`.", "Use `x`")]
+    [InlineData("`x`\r\n", "`x`.\r\n")]
+    [InlineData("`x`.\r\n", "`x`\r\n")]
+    public void OneSidedEditsWithoutAnUnprotectedAnchorAreRejected(string original, string corrected)
+    {
+        Assert.True(TextStructure.IsPreserved(original, corrected));
+        Assert.Null(ComposerEditPlan.Create(original, corrected));
+    }
+
+    [Theory]
     [InlineData("- korekt\r\n\r\n  2. Änderug\r\n", "- korrekt\r\n\r\n  2. Änderung\r\n")]
     [InlineData("Korekt `var x = 1` korekt", "Korrekt `var x = 1` korrekt")]
     [InlineData("🙂 korekt 🙂 korekt", "🙂 korrekt 🙂 korrekt")]
@@ -42,6 +84,7 @@ public sealed class ComposerEditPlanTests
     [InlineData("Vor\ufffc nach", "Vor nach")]
     [InlineData("[Text](https://example.test)", "[Text](https://other.test)")]
     [InlineData("Text\tText", "Text Text")]
+    [InlineData("abc`x`", "abcX`x`")]
     public void RejectsMutatedStructureTechnicalSpansAndObjects(string original, string corrected) =>
         Assert.Null(ComposerEditPlan.Create(original, corrected));
 

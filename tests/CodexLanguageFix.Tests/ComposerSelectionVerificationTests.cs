@@ -9,8 +9,6 @@ public sealed class ComposerSelectionVerificationTests
     {
         var checks = new Queue<ComposerSelectionCheck>([
             ComposerSelectionCheck.CountMismatch,
-            ComposerSelectionCheck.StartMismatch,
-            ComposerSelectionCheck.EndMismatch,
             ComposerSelectionCheck.TextMismatch,
             ComposerSelectionCheck.Exact]);
 
@@ -27,10 +25,10 @@ public sealed class ComposerSelectionVerificationTests
         {
             attempts++;
             Assert.True(attempts <= 50, "Die Auswahlbestätigung muss zeitlich begrenzt bleiben.");
-            return ComposerSelectionCheck.StartMismatch;
+            return ComposerSelectionCheck.TextMismatch;
         });
 
-        Assert.Equal(ComposerSelectionCheck.StartMismatch, result);
+        Assert.Equal(ComposerSelectionCheck.TextMismatch, result);
         Assert.True(attempts > 1);
     }
 

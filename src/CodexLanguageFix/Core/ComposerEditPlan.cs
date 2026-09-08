@@ -28,7 +28,10 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
         {
             var beforeEnd = index == before.Count ? original.Length : before[index].Start;
             var afterEnd = index == after.Count ? corrected.Length : after[index].Start;
-            AddEdit(original[beforeStart..beforeEnd], corrected[afterStart..afterEnd], beforeStart, edits);
+            if (!AddEdit(original[beforeStart..beforeEnd], corrected[afterStart..afterEnd], beforeStart, edits))
+            {
+                return null;
+            }
             if (index == before.Count)
             {
                 break;
@@ -54,11 +57,11 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
         return reconstructed == corrected ? new ComposerEditPlan(original, corrected, ordered) : null;
     }
 
-    private static void AddEdit(string original, string corrected, int start, List<ComposerTextEdit> edits)
+    private static bool AddEdit(string original, string corrected, int start, List<ComposerTextEdit> edits)
     {
         if (original == corrected)
         {
-            return;
+            return true;
         }
 
         var prefix = 0;
@@ -87,9 +90,34 @@ public sealed record ComposerEditPlan(string Original, string Corrected, IReadOn
             suffix--;
         }
 
+        if (original.Length - prefix - suffix == 0 || corrected.Length - prefix - suffix == 0)
+        {
+            // Der native Schreibpfad benötigt auch für den Rückweg eine nichtleere Textauswahl.
+            // AddEdit erhält ausschließlich einen einzelnen, bereits ungeschützten Textblock.
+            if (prefix > 0)
+            {
+                prefix = originalBoundaries.Where(boundary => boundary < prefix
+                    && correctedBoundaries.Contains(boundary)).Max();
+            }
+            else if (suffix > 0)
+            {
+                var originalEnd = original.Length - suffix;
+                var correctedEnd = corrected.Length - suffix;
+                var anchorLength = originalBoundaries.Where(boundary => boundary > originalEnd)
+                    .Select(boundary => boundary - originalEnd)
+                    .Where(length => correctedBoundaries.Contains(correctedEnd + length)).Min();
+                suffix -= anchorLength;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
         edits.Add(new ComposerTextEdit(start + prefix,
             original.Substring(prefix, original.Length - prefix - suffix),
             corrected.Substring(prefix, corrected.Length - prefix - suffix)));
+        return true;
     }
 
     private static IReadOnlyList<TextSpan> GetFrozenRanges(string text)

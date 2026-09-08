@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -864,9 +865,19 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 if (!IsCurrentEditor) return Fail("invalid_identity");
                 if (Read() != before) return Fail("before_mismatch");
 
-                range.Select();
+                // Nur den Anfang nativ setzen: Chromium kann ein UIA-Bereichsende hinter
+                // einen echten Absatzumbruch verschieben. Die Auswahl wird per Tastatur aufgebaut.
+                var caret = range.Clone();
+                caret.MoveEndpointByRange(TextPatternRangeEndpoint.End, caret, TextPatternRangeEndpoint.Start);
+                caret.Select();
                 var textPattern = (TextPattern)element.GetCurrentPattern(TextPattern.Pattern);
-                var confirmation = ComposerSelectionVerification.WaitForExact(CheckSelection);
+                var confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection(""));
+                if (confirmation != ComposerSelectionCheck.Exact)
+                    return Fail(ComposerSelectionVerification.Status(confirmation));
+                if (!IsCurrentEditor) return Fail("invalid_identity_after_selection");
+                if (Read() != before) return Fail("before_mismatch_after_selection");
+                if (!UnicodeInput.SelectFollowingText(expected)) return Fail("selection_sendinput_failed");
+                confirmation = ComposerSelectionVerification.WaitForExact(() => CheckSelection(expected));
                 if (confirmation != ComposerSelectionCheck.Exact)
                     return Fail(ComposerSelectionVerification.Status(confirmation));
                 if (!IsCurrentEditor) return Fail("invalid_identity_after_selection");
@@ -877,18 +888,32 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     return Fail("sendinput_failed");
                 }
 
-                ComposerSelectionCheck CheckSelection()
+                ComposerSelectionCheck CheckSelection(string selectedText)
                 {
                     if (!IsCurrentEditor) return ComposerSelectionCheck.EditorChanged;
                     if (Read() != before) return ComposerSelectionCheck.SourceChanged;
                     var selection = textPattern.GetSelection();
                     var result = ComposerSelectionCheck.Exact;
                     if (selection.Length != 1) result = ComposerSelectionCheck.CountMismatch;
-                    else if (selection[0].CompareEndpoints(TextPatternRangeEndpoint.Start,
-                        range, TextPatternRangeEndpoint.Start) != 0) result = ComposerSelectionCheck.StartMismatch;
-                    else if (selection[0].CompareEndpoints(TextPatternRangeEndpoint.End,
-                        range, TextPatternRangeEndpoint.End) != 0) result = ComposerSelectionCheck.EndMismatch;
-                    else if (selection[0].GetText(-1) != expected) result = ComposerSelectionCheck.TextMismatch;
+                    else
+                    {
+                        // Chromium kann dieselbe Auswahl mit anderen AX-Endpunktankern zurückgeben.
+                        // Inhalt und vollständige Umgebung müssen dennoch ordinal exakt übereinstimmen.
+                        var document = textPattern.DocumentRange;
+                        var prefix = document.Clone();
+                        prefix.MoveEndpointByRange(TextPatternRangeEndpoint.End,
+                            selection[0], TextPatternRangeEndpoint.Start);
+                        var through = document.Clone();
+                        through.MoveEndpointByRange(TextPatternRangeEndpoint.End,
+                            selection[0], TextPatternRangeEndpoint.End);
+                        var suffix = document.Clone();
+                        suffix.MoveEndpointByRange(TextPatternRangeEndpoint.Start,
+                            selection[0], TextPatternRangeEndpoint.End);
+                        if (!ComposerTextRangeMapping.MatchesSelection(before, start, selectedText,
+                            document.GetText(-1), prefix.GetText(-1), through.GetText(-1),
+                            selection[0].GetText(-1), suffix.GetText(-1)))
+                            result = ComposerSelectionCheck.TextMismatch;
+                    }
                     if (!IsCurrentEditor) return ComposerSelectionCheck.EditorChanged;
                     if (Read() != before) return ComposerSelectionCheck.SourceChanged;
                     return result;
@@ -992,13 +1017,58 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint window, out int processId);
 
-    private static class UnicodeInput
+    internal static class UnicodeInput
     {
         private const ushort VirtualKeyBack = 0x08;
         private const uint KeyEventKeyUp = 0x0002;
         private const uint KeyEventUnicode = 0x0004;
         private const int InputKeyboard = 1;
         public static int StructSize => Marshal.SizeOf<INPUT>();
+
+        public static bool SelectFollowingText(string text)
+        {
+            var keys = SelectionKeys(text);
+            if (keys.Length == 0) return false;
+            var inputs = keys.Select(key => Key(key.Key, key.Flags)).ToArray();
+            if (!ModifiersAreReleased()) return false;
+            var sent = SendInput((uint)inputs.Length, inputs, StructSize);
+            if (sent == inputs.Length) return true;
+            var release = SelectionReleaseKeys(sent, inputs.Length).Select(key => Key(key.Key, key.Flags)).ToArray();
+            if (release.Length > 0) _ = SendInput((uint)release.Length, release, StructSize);
+            return false;
+        }
+
+        internal static (ushort Key, uint Flags)[] SelectionKeys(string text)
+        {
+            if (text.Length == 0 || text.Any(character => char.IsControl(character)
+                || character is '\ufffc' or '\u2028' or '\u2029')) return [];
+            var count = StringInfo.ParseCombiningCharacters(text).Length;
+            var keys = new (ushort Key, uint Flags)[count * 2 + 2];
+            keys[0] = (0x10, 0); // Shift
+            for (var index = 0; index < count; index++)
+            {
+                keys[index * 2 + 1] = (0x27, 0x0001); // Right, extended key
+                keys[index * 2 + 2] = (0x27, 0x0001 | KeyEventKeyUp);
+            }
+            keys[^1] = (0x10, KeyEventKeyUp);
+            return keys;
+        }
+
+        internal static (ushort Key, uint Flags)[] SelectionReleaseKeys(uint sent, int planned)
+        {
+            if (sent == 0 || sent >= planned) return [];
+            // Nur eigene angenommene Key-down-Ereignisse auflösen, niemals eine zweite Auswahl senden.
+            return sent > 1 && sent % 2 == 0
+                ? [(0x27, 0x0001 | KeyEventKeyUp), (0x10, KeyEventKeyUp)]
+                : [(0x10, KeyEventKeyUp)];
+        }
+
+        internal static bool AreModifierStatesReleased(short shift, short control, short alt, short leftWin, short rightWin) =>
+            shift >= 0 && control >= 0 && alt >= 0 && leftWin >= 0 && rightWin >= 0;
+
+        private static bool ModifiersAreReleased() => AreModifierStatesReleased(
+            GetAsyncKeyState(0x10), GetAsyncKeyState(0x11), GetAsyncKeyState(0x12),
+            GetAsyncKeyState(0x5B), GetAsyncKeyState(0x5C));
 
         public static bool ReplaceSelection(string text)
         {
@@ -1010,6 +1080,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             if (text.Length == 0)
             {
                 var deletion = new[] { Key(VirtualKeyBack, 0), Key(VirtualKeyBack, KeyEventKeyUp) };
+                if (!ModifiersAreReleased()) return false;
                 return SendInput((uint)deletion.Length, deletion, StructSize) == deletion.Length;
             }
 
@@ -1020,7 +1091,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 inputs[index * 2 + 1] = UnicodeKey(text[index], KeyEventKeyUp);
             }
 
-            return SendInput((uint)inputs.Length, inputs, StructSize) == inputs.Length;
+            return ModifiersAreReleased() && SendInput((uint)inputs.Length, inputs, StructSize) == inputs.Length;
         }
 
         private static INPUT Key(ushort virtualKey, uint flags) => new()
@@ -1043,6 +1114,9 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT
