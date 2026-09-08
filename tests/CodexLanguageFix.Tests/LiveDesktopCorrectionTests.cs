@@ -49,6 +49,43 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void PreparedSyntheticRepeatedBullets_DirectNativeRoundTrips()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_REPEATED_BULLETS_NATIVE_TEST") != "1") return;
+        foreach (var correctedLine in new[] { "Das ist ein Fehler.", "Das ist eon fehler.",
+            "Das ist ein fehler.!", "Dies ist ein Fehler." })
+        foreach (var mask in new[] { 1, 2, 4, 7 })
+        {
+            RunNativeRoundTrip(RepeatedBulletFixtures(mask, correctedLine), ComposerHost.Codex);
+        }
+    }
+
+    [Fact]
+    public void PreparedSyntheticFiveBullets_DirectNativeRoundTrips()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_FIVE_BULLETS_NATIVE_TEST") != "1") return;
+        foreach (var mask in new[] { 1, 2, 4, 8, 16, 31 })
+            RunNativeRoundTrip(RepeatedBulletFixtures(mask, "Das ist ein Fehler.", 5), ComposerHost.Codex);
+    }
+
+    [Fact]
+    public void PreparedSyntheticRepeatedBullets_IsCorrectedAndUndoneThroughOwnOverlay()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_REPEATED_BULLETS_LIVE_TEST") != "1") return;
+        RunOverlayRoundTrip(RepeatedBulletFixtures(7, "Das ist ein Fehler.")
+            .Concat(RepeatedBulletFixtures(31, "Das ist ein Fehler.", 5)).ToArray(), ComposerHost.Codex);
+    }
+
+    private static PreparedFixture[] RepeatedBulletFixtures(int mask, string correctedLine, int count = 3) =>
+        (from marker in new[] { "• ", "- " }
+         from newline in new[] { "\n", "\r\n" }
+         from suffix in new[] { "", newline }
+         select new PreparedFixture(
+             string.Join(newline, Enumerable.Repeat(marker + "Das ist ein fehler.", count)) + suffix,
+             string.Join(newline, Enumerable.Range(0, count).Select(index =>
+                 marker + ((mask & (1 << index)) != 0 ? correctedLine : "Das ist ein fehler."))) + suffix)).ToArray();
+
+    [Fact]
     public void PreparedSyntheticEndInsertion_DirectNativeRoundTrip()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_END_INSERTION_TEST") != "1") return;

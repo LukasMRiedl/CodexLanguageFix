@@ -5,6 +5,82 @@ namespace CodexLanguageFix.Tests;
 public sealed class ComposerTextRangeMappingTests
 {
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void RepeatedBulletsUseTheirOwnExactTextNodeAsSearchAnchor(int bulletIndex)
+    {
+        const string leaf = "Das ist ein fehler.";
+        var full = string.Join("\n", Enumerable.Repeat("• " + leaf, 3));
+        var leafStart = bulletIndex * (leaf.Length + 3) + 2;
+        var start = leafStart + leaf.IndexOf('f');
+        Assert.True(ComposerTextRangeMapping.IsSearchAnchor(full, start, full[..leafStart], leaf));
+        if (bulletIndex > 0)
+            Assert.False(ComposerTextRangeMapping.IsSearchAnchor(full, start, full[..2], leaf));
+    }
+
+    [Theory]
+    [InlineData("wrong-prefix")]
+    [InlineData("missing-marker")]
+    [InlineData("wrong-marker")]
+    [InlineData("normalized-newline")]
+    [InlineData("wrong-text")]
+    public void SearchAnchorRejectsChangedDocumentParts(string change)
+    {
+        const string full = "• fehler\r\n• fehler";
+        const string prefix = "• fehler\r\n• ";
+        Assert.False(ComposerTextRangeMapping.IsSearchAnchor(full, prefix.Length,
+            change switch
+            {
+                "wrong-prefix" => "• Fehler\r\n• ",
+                "missing-marker" => "• fehler\r\n",
+                "wrong-marker" => "• fehler\r\n- ",
+                "normalized-newline" => "• fehler\n• ",
+                _ => prefix
+            }, change == "wrong-text" ? "Fehler" : "fehler"));
+    }
+
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void SearchAnchorCannotCrossAnEarlierLineBreak(string newline)
+    {
+        var full = "a" + newline + "b";
+        Assert.True(ComposerTextRangeMapping.IsSearchAnchor(full, 0, "", full));
+        Assert.False(ComposerTextRangeMapping.IsSearchAnchor(full, 1 + newline.Length, "", full));
+        Assert.True(ComposerTextRangeMapping.IsSearchAnchor(full, 1 + newline.Length, "a" + newline, "b"));
+    }
+
+    [Theory]
+    [InlineData("🙂")]
+    [InlineData("a\u0308")]
+    [InlineData("👩\u200d💻")]
+    public void UnicodeSearchAnchorsKeepExactUtf16OffsetsAndContent(string grapheme)
+    {
+        var leaf = grapheme + " fehler";
+        var prefix = "• " + leaf + "\r\n• ";
+        var full = prefix + leaf;
+        var start = prefix.Length + grapheme.Length + 1;
+        Assert.True(ComposerTextRangeMapping.IsSearchAnchor(full, start, prefix, leaf));
+        Assert.False(ComposerTextRangeMapping.IsSearchAnchor(full, start, prefix[..^1], leaf));
+        Assert.False(ComposerTextRangeMapping.IsSearchAnchor(full, start, prefix, leaf[1..]));
+    }
+
+    [Theory]
+    [InlineData(-1, "", "abc")]
+    [InlineData(3, "", "abc")]
+    [InlineData(int.MaxValue, "", "abc")]
+    [InlineData(1, "ab", "c")]
+    [InlineData(0, "", "")]
+    [InlineData(3, "abc", "")]
+    [InlineData(0, "", "abcd")]
+    [InlineData(2, "ab", "cd")]
+    [InlineData(2, "abcd", "")]
+    public void InvalidSearchAnchorBoundsAreRejectedWithoutSlicingExceptions(int start, string prefix, string rangeText) =>
+        Assert.False(ComposerTextRangeMapping.IsSearchAnchor("abc", start, prefix, rangeText));
+
+    [Theory]
     [InlineData("Das ist ein fehler.", 12, "f")]
     [InlineData("Das ist ein fehler.\r\n", 12, "f")]
     [InlineData("Das ist ein Test", 15, "t")]

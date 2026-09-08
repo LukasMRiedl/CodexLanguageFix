@@ -5,6 +5,13 @@ namespace CodexLanguageFix.Windows;
 
 internal static class ComposerTextRangeMapping
 {
+    internal static bool IsSearchAnchor(string full, int start, string prefix, string rangeText) =>
+        prefix.Length <= full.Length && rangeText.Length <= full.Length - prefix.Length
+        && start >= prefix.Length && start - prefix.Length < rangeText.Length
+        && prefix.AsSpan().SequenceEqual(full.AsSpan(0, prefix.Length))
+        && rangeText.AsSpan().SequenceEqual(full.AsSpan(prefix.Length, rangeText.Length))
+        && rangeText.AsSpan(0, start - prefix.Length).IndexOfAny('\r', '\n') < 0;
+
     internal static bool Matches(string full, int start, string expected, string prefix, string rangeText) =>
         start >= 0 && start <= full.Length && expected.Length <= full.Length - start
         && full.AsSpan(start, expected.Length).SequenceEqual(expected)

@@ -961,10 +961,35 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 ? caret : null;
         }
 
-        private static TextPatternRange? FindVerifiedTextRange(
+        private TextPatternRange? FindVerifiedTextRange(
             TextPatternRange document, string full, int start, string expected)
         {
             var remaining = document.Clone();
+            var textPattern = (TextPattern)element.GetCurrentPattern(TextPattern.Pattern);
+            var startAnchored = false;
+            var endAnchored = false;
+            // FindText kann generierte Absatztrenner vor einem Treffer falsch mitzählen.
+            // Beide Suchgrenzen auf die Zieltextknoten begrenzen, ohne Offsets zu korrigieren.
+            foreach (AutomationElement textElement in element.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)))
+            {
+                var textRange = textPattern.RangeFromChild(textElement);
+                var prefix = document.Clone();
+                prefix.MoveEndpointByRange(TextPatternRangeEndpoint.End, textRange, TextPatternRangeEndpoint.Start);
+                var prefixText = prefix.GetText(-1);
+                var rangeText = textRange.GetText(-1);
+                if (!startAnchored && ComposerTextRangeMapping.IsSearchAnchor(full, start, prefixText, rangeText))
+                {
+                    remaining.MoveEndpointByRange(TextPatternRangeEndpoint.Start, textRange, TextPatternRangeEndpoint.Start);
+                    startAnchored = true;
+                }
+                if (!endAnchored && ComposerTextRangeMapping.IsSearchAnchor(full, start + expected.Length - 1, prefixText, rangeText))
+                {
+                    remaining.MoveEndpointByRange(TextPatternRangeEndpoint.End, textRange, TextPatternRangeEndpoint.End);
+                    endAnchored = true;
+                }
+                if (startAnchored && endAnchored) break;
+            }
             var previousPrefixLength = -1;
             for (var attempt = 0; attempt <= full.Length; attempt++)
             {
