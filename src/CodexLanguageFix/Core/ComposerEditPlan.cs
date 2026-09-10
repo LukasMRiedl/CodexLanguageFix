@@ -296,9 +296,8 @@ internal static class ComposerWriteTransaction
                 {
                     applied.Add(edit);
                     expected = next;
+                    pending = null;
                 }
-
-                pending = null;
 
                 if (!succeeded || observed != next)
                 {

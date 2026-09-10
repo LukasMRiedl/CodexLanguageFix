@@ -6,7 +6,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source contains **release candidate 1.3.1-rc.5**, fixing unnecessary rejections of multi-error corrections. Layout whitespace is restored locally; punctuation can follow protected technical content without rewriting it. All 387 offline tests, four real Luna multi-error cases and native correction/undo checks including three bullets with nine errors passed. See the [multi-error repair report](docs/multiple-errors-repair-2026-09-08.md). Earlier verification reports remain available. Historical message edit dialogs, mixed-DPI monitors and screen-edge cases remain unverified; known placement limitations are outside this repair. RC5 is not yet published on GitHub and is not a fully accepted stable release.
+The current source contains **release candidate 1.3.1-rc.6**: no original-text recovery window, longer read-only insertion verification and no unnecessary MCP/plugin helper processes for Luna. All 402 offline tests pass. See the [insertion and memory report](docs/insertion-ram-repair-2026-09-10.md) for evidence and limitations. Earlier reports remain available. Historical edit dialogs, mixed-DPI monitors and screen-edge cases were not retested. RC6 is not published on GitHub and is not a fully accepted stable release.
 
 ## Features
 
@@ -22,7 +22,7 @@ The current source contains **release candidate 1.3.1-rc.5**, fixing unnecessary
 - Paragraphs, blank lines, indentation, list markers, checkboxes and Markdown line breaks are validated before insertion. Unsafe Luna responses are rejected; unsafe LanguageTool edits are skipped.
 - Corrections use verified text ranges, without a typing animation or whole-editor retyping. Undo is restricted to the original editor and exact corrected text.
 - The compact button is placed only in a verified free area belonging to a uniquely identified composer. It hides when identification or placement is ambiguous. Positioning uses the target monitor's DPI, including negative monitor coordinates.
-- Requests are cancelled when the source editor or text changes, the provider changes, or correction is disabled. Partial write failures never trigger a blind full-text retry; the original remains available in a local recovery window when safe rollback is impossible.
+- Requests are cancelled when the source editor or text changes, the provider changes, or correction is disabled. Partial write failures never trigger a blind full-text retry. Verified own changes are rolled back when safe; no recovery window opens.
 - No background service and no automatic updater.
 
 ## Installation

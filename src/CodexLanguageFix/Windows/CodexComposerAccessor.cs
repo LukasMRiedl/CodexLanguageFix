@@ -88,7 +88,15 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
         var focusableElements = root.FindAll(
             TreeScope.Descendants,
-            new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true));
+            new AndCondition(
+                new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
+                new PropertyCondition(AutomationElement.IsEnabledProperty, true),
+                new PropertyCondition(AutomationElement.IsOffscreenProperty, false),
+                new OrCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Group),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox))));
         AutomationElement? candidate = null;
         foreach (AutomationElement element in focusableElements)
         {
@@ -797,21 +805,6 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return IsFocusedElementOrAncestor(element);
     }
 
-    private static bool WaitForText(AutomationElement element, string expected)
-    {
-        for (var attempt = 0; attempt < 6; attempt++)
-        {
-            if (string.Equals(ReadText(element), expected, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            Thread.Sleep(25);
-        }
-
-        return false;
-    }
-
     private sealed class NativeEditTarget(ComposerSnapshot snapshot, AutomationElement element)
         : IComposerEditTarget
     {
@@ -940,7 +933,9 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 }
             }
 
-            if (!WaitForText(element, after)) return Fail("readback_mismatch");
+            var readback = ComposerWriteVerification.WaitForExact(after, Read, () => IsCurrentEditor);
+            if (readback != ComposerWriteCheck.Exact)
+                return Fail(readback == ComposerWriteCheck.EditorChanged ? "readback_editor_changed" : "readback_mismatch");
             if (!_failed) LastStatus = "ok";
             return true;
         }

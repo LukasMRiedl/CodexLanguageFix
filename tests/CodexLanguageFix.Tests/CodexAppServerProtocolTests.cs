@@ -8,6 +8,36 @@ namespace CodexLanguageFix.Tests;
 public sealed class CodexAppServerProtocolTests
 {
     [Fact]
+    public void CorrectionThreads_DisableEveryConfiguredMcpWithoutRetainingConfigurationValues()
+    {
+        using var config = JsonDocument.Parse("""
+            {"config":{"mcp_servers":{"local":{"command":"private-command","env":{"TOKEN":"secret"}},"remote.with.dots":{"url":"https://private.invalid","enabled":true},"already-off":{"enabled":false}}}}
+            """);
+
+        var disabled = CodexAppServerClient.DisabledMcpServers(config.RootElement);
+        var json = JsonSerializer.SerializeToElement(disabled);
+
+        Assert.Equal(3, disabled.Count);
+        foreach (var server in json.EnumerateObject())
+        {
+            Assert.Single(server.Value.EnumerateObject());
+            Assert.False(server.Value.GetProperty("enabled").GetBoolean());
+        }
+        Assert.False(json.GetProperty("remote.with.dots").GetProperty("enabled").GetBoolean());
+        Assert.DoesNotContain("secret", json.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private", json.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{\"config\":{}}")]
+    [InlineData("{\"config\":{\"mcp_servers\":null}}")]
+    public void CorrectionThreads_HandleNoConfiguredMcpServers(string response)
+    {
+        using var config = JsonDocument.Parse(response);
+        Assert.Empty(CodexAppServerClient.DisabledMcpServers(config.RootElement));
+    }
+
+    [Fact]
     public void ModelList_DetectsOnlyExactLunaFastCapability()
     {
         using var supported = JsonDocument.Parse("""

@@ -184,8 +184,6 @@ public sealed class CorrectionCoordinator : IDisposable
 
             if (!replaced)
             {
-                if (_composerAccessor.LastWriteResult?.State == ComposerWriteState.PartiallyApplied)
-                    new RecoveryWindow(snapshot.Text, _localizer).Show();
                 var detail = _composerAccessor is CodexComposerAccessor accessor
                     ? accessor.LastWriteStatus
                     : "unknown";
@@ -267,8 +265,6 @@ public sealed class CorrectionCoordinator : IDisposable
         {
             var detail = _composerAccessor is CodexComposerAccessor accessor ? accessor.LastWriteStatus : "unknown";
             _logger.Write($"composer_undo_rejected_{detail}", current.Text.Length);
-            if (_composerAccessor.LastWriteResult?.State == ComposerWriteState.PartiallyApplied)
-                new RecoveryWindow(_undo.Original, _localizer).Show();
             ShowTransient(_localizer.Get(AppText.UndoFailed));
         }
     }

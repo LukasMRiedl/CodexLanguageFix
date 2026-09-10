@@ -14,7 +14,8 @@ The current prompt is sent only to the provider selected in the system tray:
 - No prompt is transmitted and no correction or local draft starts unless you click the correction button.
 - Luna may warm the App Server and one empty thread without transmitting composer content.
 - The clipboard is never read or modified.
-- During insertion, the original and verified changes are held in memory for safe rollback. If an uncertain partial write cannot be rolled back without risking user edits, a local read-only recovery window retains the original. These texts are not written to logs or recovery files.
+- During insertion, the original and verified changes are held in memory for safe rollback. No original-text recovery window opens. These texts are not written to logs or recovery files.
+- Plugins and configured MCP servers are disabled for the app's correction threads. This does not change the user's global Codex configuration or other apps.
 - The app has no OpenAI API-key path and never reads, stores, or logs OAuth tokens. OAuth is owned and refreshed by the official Codex runtime; Luna therefore causes no separate OpenAI API-key billing through this app.
 - With LanguageTool, technical sections are protected from correction but remain part of the annotated request.
 - With Luna, code, URLs, email addresses, link targets, file paths, command-line options, and code identifiers are replaced locally with random opaque placeholders. Their original contents are not sent to Luna.

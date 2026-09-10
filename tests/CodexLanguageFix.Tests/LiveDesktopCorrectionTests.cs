@@ -38,6 +38,17 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         .ToArray();
 
     [Fact]
+    public void PreparedSyntheticMultipleErrors_TenFirstAttemptRoundTrips()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_FIRST_ATTEMPT_STRESS_TEST") != "1") return;
+        for (var round = 0; round < 10; round++)
+        {
+            RunNativeRoundTrip(MultipleErrorFixtures(), ComposerHost.Codex);
+            output.WriteLine($"firstAttemptRound={round + 1}; correctedAndUndone=True");
+        }
+    }
+
+    [Fact]
     public void PreparedSyntheticMultipleErrors_DirectNativeRoundTrip()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_MULTI_ERROR_NATIVE_TEST") != "1") return;

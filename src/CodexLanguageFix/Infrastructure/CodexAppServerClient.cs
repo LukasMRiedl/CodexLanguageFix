@@ -35,6 +35,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
     private readonly Task _cleanupWorker;
     private Process? _process;
     private JsonRpcLineConnection? _connection;
+    private volatile bool _connectionReady;
+    private IReadOnlyDictionary<string, object> _disabledMcpServers = new Dictionary<string, object>();
     private PreparedLunaThread? _preparedThread;
     private LunaProtocolTiming? _lastProtocolTiming;
     private int _disposeRequested;
@@ -601,9 +603,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
                     model_verbosity = "low",
                     service_tier = profile.ServiceTier,
                     web_search = "disabled",
+                    mcp_servers = _disabledMcpServers,
                     features = new
                     {
                         apps = false,
+                        plugins = false,
                         multi_agent = false,
                         shell_tool = false
                     },
@@ -708,7 +712,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
     private async Task<JsonRpcLineConnection> EnsureStartedAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
-        if (_connection is not null && _process is { HasExited: false })
+        if (_connectionReady && _connection is not null && _process is { HasExited: false })
         {
             return _connection;
         }
@@ -717,11 +721,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         try
         {
             ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
-            if (_connection is not null && _process is { HasExited: false })
+            if (_connectionReady && _connection is not null && _process is { HasExited: false })
             {
                 return _connection;
             }
 
+            _connectionReady = false;
             var executable = CodexExecutableLocator.Find()
                 ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexNotInstalled));
             var startInfo = new ProcessStartInfo(executable)
@@ -737,6 +742,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
                 WorkingDirectory = _runtimeDirectory
             };
             Directory.CreateDirectory(_runtimeDirectory);
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("features.plugins=false");
             var privateCatalog = LunaModelCatalogOverride.TryCreate(_runtimeDirectory);
             if (privateCatalog is not null)
             {
@@ -777,6 +784,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
                 },
                 cancellationToken).ConfigureAwait(false);
             await connection.NotifyAsync("initialized", new { }, cancellationToken).ConfigureAwait(false);
+            var effectiveConfig = await connection.RequestAsync(
+                "config/read",
+                new { cwd = _runtimeDirectory, includeLayers = false },
+                cancellationToken).ConfigureAwait(false);
+            _disabledMcpServers = DisabledMcpServers(effectiveConfig);
+            _connectionReady = true;
             return connection;
         }
         catch (System.ComponentModel.Win32Exception exception)
@@ -793,6 +806,23 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         {
             _startGate.Release();
         }
+    }
+
+    internal static IReadOnlyDictionary<string, object> DisabledMcpServers(JsonElement configResponse)
+    {
+        var disabled = new Dictionary<string, object>(StringComparer.Ordinal);
+        if (configResponse.TryGetProperty("config", out var config)
+            && config.TryGetProperty("mcp_servers", out var servers)
+            && servers.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var server in servers.EnumerateObject())
+            {
+                // Nur Namen übernehmen. Befehle, Umgebungsvariablen und Zugangsdaten
+                // aus der persönlichen Konfiguration bleiben nicht im Client liegen.
+                disabled[server.Name] = new { enabled = false };
+            }
+        }
+        return disabled;
     }
 
     private static async Task DrainStandardErrorAsync(StreamReader reader)
@@ -816,6 +846,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
     private void CleanupFailedStart()
     {
+        _connectionReady = false;
         _connection?.Dispose();
         _connection = null;
         ClearCapabilityCaches();
@@ -1003,6 +1034,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
             _connection?.Dispose();
             _connection = null;
+            _connectionReady = false;
             ClearCapabilityCaches();
             await _preparedThreadGate.WaitAsync().ConfigureAwait(false);
             try

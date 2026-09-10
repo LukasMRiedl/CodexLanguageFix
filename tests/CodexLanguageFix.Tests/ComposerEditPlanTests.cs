@@ -224,6 +224,65 @@ public sealed class ComposerEditPlanTests
     }
 
     [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    public void FailedWriteWithLateReadbackRollsBackEachVerifiedChangeOnlyOnce(int failingCall, bool staleFirstRead)
+    {
+        var plan = TwoChanges();
+        var target = new MemoryTarget(plan.Original)
+        {
+            ReturnFalseAfterWrite = failingCall,
+            StaleReadAfterWrite = staleFirstRead ? failingCall : null
+        };
+
+        var result = ComposerWriteTransaction.Apply(plan, target);
+
+        Assert.Equal(ComposerWriteState.Unchanged, result.State);
+        Assert.Equal("write_not_verified", result.Status);
+        Assert.Equal(plan.Original, target.Text);
+        Assert.Equal(failingCall, result.AppliedChanges);
+        Assert.Equal(failingCall * 2, target.WriteCalls);
+    }
+
+    [Fact]
+    public void LateReadbackDoesNotRollBackAfterFocusLoss()
+    {
+        var plan = TwoChanges();
+        var target = new MemoryTarget(plan.Original)
+        {
+            ReturnFalseAfterWrite = 1,
+            StaleReadAfterWrite = 1,
+            LoseFocusAfterWrite = 1
+        };
+
+        var result = ComposerWriteTransaction.Apply(plan, target);
+
+        Assert.Equal(ComposerWriteState.PartiallyApplied, result.State);
+        Assert.Equal(1, target.WriteCalls);
+        Assert.NotEqual(plan.Original, target.Text);
+    }
+
+    [Fact]
+    public void LateReadbackDoesNotOverwriteNewUserText()
+    {
+        var plan = TwoChanges();
+        var target = new MemoryTarget(plan.Original)
+        {
+            ReturnFalseAfterWrite = 1,
+            StaleReadAfterWrite = 1,
+            UserChangeAfterWrite = 1
+        };
+
+        var result = ComposerWriteTransaction.Apply(plan, target);
+
+        Assert.Equal(ComposerWriteState.PartiallyApplied, result.State);
+        Assert.Equal(1, target.WriteCalls);
+        Assert.Equal("Eigene neue Eingabe", target.Text);
+    }
+
+    [Theory]
     [InlineData(0, ComposerWriteState.Unchanged)]
     [InlineData(1, ComposerWriteState.PartiallyApplied)]
     public void PersistentReadFailureReportsPartialStateOnlyAfterAWriteAttempt(
@@ -284,14 +343,22 @@ public sealed class ComposerEditPlanTests
         public bool IsCurrentEditor { get; private set; } = true;
         public int? InvalidSelection { get; init; }
         public int? FailOnWrite { get; init; }
+        public int? ReturnFalseAfterWrite { get; init; }
+        public int? StaleReadAfterWrite { get; init; }
         public int? ThrowAfterWrite { get; init; }
         public int? UserChangeAfterWrite { get; init; }
         public int? LoseFocusAfterWrite { get; init; }
         public int? ReadFailureAfterWrites { get; init; }
         public int WriteCalls { get; private set; }
-        public string? Read() => ReadFailureAfterWrites is { } failureAfterWrites && WriteCalls >= failureAfterWrites
-            ? throw new InvalidOperationException("Editor text is unavailable.")
-            : Text;
+        private string? _staleRead;
+        public string? Read()
+        {
+            if (ReadFailureAfterWrites is { } failureAfterWrites && WriteCalls >= failureAfterWrites)
+                throw new InvalidOperationException("Editor text is unavailable.");
+            if (_staleRead is not { } stale) return Text;
+            _staleRead = null;
+            return stale;
+        }
         public bool CanReplace(int start, string expected) => start != InvalidSelection
             && Text.AsSpan(start, expected.Length).SequenceEqual(expected);
         public bool Replace(int start, string expected, string replacement)
@@ -304,11 +371,12 @@ public sealed class ComposerEditPlanTests
 
             Assert.True(IsCurrentEditor);
             Assert.Equal(expected, Text.Substring(start, expected.Length));
+            if (WriteCalls == StaleReadAfterWrite) _staleRead = Text;
             Text = Text.Remove(start, expected.Length).Insert(start, replacement);
             if (WriteCalls == LoseFocusAfterWrite) IsCurrentEditor = false;
             if (WriteCalls == UserChangeAfterWrite) Text = "Eigene neue Eingabe";
             if (WriteCalls == ThrowAfterWrite) throw new InvalidOperationException("Write completed before transport failed.");
-            return true;
+            return WriteCalls != ReturnFalseAfterWrite;
         }
     }
 }

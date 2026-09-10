@@ -6,7 +6,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1-rc.5** gegen unnötige Ablehnungen bei Mehrfehlertexten. Layout-Leerraum wird lokal wiederhergestellt; Satzzeichen hinter technischen Inhalten sind möglich, ohne diese Inhalte neu zu schreiben. Alle 387 Offline-Tests, vier echte Luna-Mehrfehlerfälle und native Korrektur-/Rückgängig-Prüfungen einschließlich drei Stichpunkten mit neun Fehlern sind bestanden. Details stehen im [Mehrfehler-Prüfbericht](docs/multiple-errors-repair-2026-09-08.md). Frühere Prüfberichte bleiben erhalten. Historische Nachrichten-Editdialoge, gemischte DPI-Werte und Bildschirmrandfälle bleiben ungeprüft; bekannte Platzierungsgrenzen sind nicht Teil dieser Reparatur. RC5 ist noch nicht auf GitHub veröffentlicht und kein vollständig abgenommener stabiler Release.
+Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1-rc.6**: kein Originaltext-Fenster mehr, längere rein lesende Bestätigung nach dem Einsetzen und keine unnötigen MCP-/Plugin-Hilfsprozesse für Luna. 402 Offline-Tests bestehen. Nachweise und Grenzen stehen im [Einsetz- und Speicherbericht](docs/insertion-ram-repair-2026-09-10.md). Frühere Prüfberichte bleiben erhalten. Historische Nachrichten-Editdialoge, gemischte DPI-Werte und Bildschirmrandfälle wurden nicht erneut geprüft. RC6 ist nicht auf GitHub veröffentlicht und kein vollständig abgenommener stabiler Release.
 
 ## Funktionen
 
@@ -22,7 +22,7 @@ Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1-rc.5** gegen unn
 - Absätze, Leerzeilen, Einrückungen, Listenzeichen, Checkboxen und Markdown-Zeilenumbrüche werden vor dem Einsetzen geprüft. Unsichere Luna-Antworten werden verworfen, schädliche LanguageTool-Einzelkorrekturen ausgelassen.
 - Änderungen werden über exakt geprüfte Textbereiche eingesetzt, ohne Tippanimation oder erneute Eingabe des gesamten Felds. Rückgängig ist nur im ursprünglichen Editor mit unverändertem Korrekturergebnis möglich.
 - Der kompakte Knopf erscheint nur auf einer geprüften freien Fläche am eindeutig zugeordneten Composer. Bei unklarer Zuordnung oder Platzmangel wird er ausgeblendet. Die Positionierung berücksichtigt die Skalierung des Zielmonitors und negative Bildschirmkoordinaten.
-- Änderungen am Ausgangstext, Editor- oder Anbieterwechsel sowie Deaktivierung brechen laufende Anfragen ab. Nach unklaren Teilschreibfehlern gibt es keinen blinden Volltextersatz; ist eine sichere Rücknahme unmöglich, bleibt das Original in einem lokalen Wiederherstellungsfenster verfügbar.
+- Änderungen am Ausgangstext, Editor- oder Anbieterwechsel sowie Deaktivierung brechen laufende Anfragen ab. Nach unklaren Teilschreibfehlern gibt es keinen blinden Volltextersatz. Eigene verifizierte Änderungen werden nach Möglichkeit sicher zurückgenommen; es öffnet sich kein Wiederherstellungsfenster.
 - Kein Hintergrunddienst und keine automatische Updatefunktion.
 
 ## Installation
