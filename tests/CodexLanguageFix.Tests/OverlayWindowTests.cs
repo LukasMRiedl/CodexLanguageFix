@@ -85,10 +85,10 @@ public sealed class OverlayWindowTests
 
                 overlay.SetBusy(true);
                 Assert.Equal(System.Windows.Visibility.Visible, overlay.BusyGlyph.Visibility);
-                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
                 overlay.SetBusy(false);
                 Assert.Equal(System.Windows.Visibility.Collapsed, overlay.BusyGlyph.Visibility);
-                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
                 overlay.ShowStatus(null);
                 Assert.Equal(28, overlay.Width);
                 Assert.Equal(28, overlay.Height);
@@ -114,6 +114,64 @@ public sealed class OverlayWindowTests
         {
             throw failure;
         }
+    }
+
+    [Fact]
+    public void BusyAnimation_RunsOnlyWhileBusyAndVisibleAndIsReleasedOnClose()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            OverlayWindow? overlay = null;
+            try
+            {
+                overlay = new OverlayWindow();
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.SetBusy(true);
+                overlay.SetBusy(true);
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+
+                overlay.Show();
+                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.SetBusy(true);
+                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.Hide();
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+
+                overlay.Show();
+                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.SetBusy(false);
+                overlay.SetBusy(false);
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+                Assert.Equal(0d, overlay.BusyRotation.Angle);
+                Assert.True(overlay.CorrectButton.IsEnabled);
+                Assert.True(overlay.UndoButton.IsEnabled);
+
+                overlay.Hide();
+                overlay.Show();
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.SetBusy(true);
+                Assert.True(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.Close();
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+                overlay.SetBusy(true);
+                Assert.False(overlay.BusyRotation.HasAnimatedProperties);
+                overlay = null;
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                overlay?.Close();
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "Der WPF-Animationstest hat das Zeitlimit überschritten.");
+        if (failure is not null)
+            throw failure;
     }
 
     [Theory]

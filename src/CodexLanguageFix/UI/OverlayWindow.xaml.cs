@@ -17,6 +17,8 @@ public partial class OverlayWindow : Window
     private string? _lastStatusMessage;
     private bool _lastStatusCanUndo;
     private bool _statusVisible;
+    private bool _busy;
+    private bool _closed;
     private readonly AppLocalizer _localizer;
     private HwndSource? _overlaySource;
     private HwndSource? _statusPopupSource;
@@ -30,10 +32,13 @@ public partial class OverlayWindow : Window
         StatusPopup.PlacementTarget = CorrectButton;
         ApplyLanguage();
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
-        StartBusyAnimation();
         SourceInitialized += (_, _) => ApplyNoActivateStyle();
         StatusPopup.Opened += (_, _) => ApplyPopupNoActivateStyle();
-        IsVisibleChanged += (_, _) => StatusPopup.IsOpen = IsVisible && _statusVisible;
+        IsVisibleChanged += (_, _) =>
+        {
+            StatusPopup.IsOpen = IsVisible && _statusVisible;
+            UpdateBusyAnimation();
+        };
     }
 
     private void Localizer_OnLanguageChanged(object? sender, EventArgs e) => ApplyLanguage();
@@ -53,14 +58,24 @@ public partial class OverlayWindow : Window
 
     public void SetBusy(bool busy)
     {
+        _busy = busy;
         CorrectButton.IsEnabled = !busy;
         UndoButton.IsEnabled = !busy;
         GrammarGlyph.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
         BusyGlyph.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBusyAnimation();
     }
 
-    private void StartBusyAnimation()
+    private void UpdateBusyAnimation()
     {
+        var shouldAnimate = _busy && IsVisible && !_closed;
+        if (BusyRotation.HasAnimatedProperties == shouldAnimate)
+            return;
+        if (!shouldAnimate)
+        {
+            BusyRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+            return;
+        }
         BusyRotation.BeginAnimation(
             RotateTransform.AngleProperty,
             new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(520))
@@ -246,6 +261,8 @@ public partial class OverlayWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _closed = true;
+        UpdateBusyAnimation();
         StatusPopup.IsOpen = false;
         if (_overlaySource is { IsDisposed: false }) _overlaySource.RemoveHook(NoActivateHook);
         if (_statusPopupSource is { IsDisposed: false }) _statusPopupSource.RemoveHook(NoActivateHook);

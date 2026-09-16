@@ -19,11 +19,28 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     public string LastCaptureStatus { get; private set; } = "not_attempted";
     internal static int NativeInputSize => UnicodeInput.StructSize;
 
-    public ComposerSnapshot? TryCaptureFocusedComposer()
+    private readonly ComposerLayoutCache _layoutCache = new();
+    internal long CaptureCount { get; private set; }
+    internal long LayoutCaptureCount { get; private set; }
+
+    public void InvalidateLayout() => _layoutCache.Clear();
+
+    public ComposerSnapshot? TryCaptureFocusedComposer() => CaptureFocusedComposer(false);
+    public ComposerSnapshot? TryPollFocusedComposer() => CaptureFocusedComposer(true);
+
+    private ComposerSnapshot? CaptureFocusedComposer(bool reuseLayout)
     {
         LastCaptureStatus = "unavailable";
         try
         {
+            var foreground = GetForegroundWindow();
+            _ = GetWindowThreadProcessId(foreground, out var processId);
+            if (foreground == 0 || (processId != Environment.ProcessId && TryGetComposerHost(processId) is null))
+            {
+                LastCaptureStatus = "other_host";
+                return null;
+            }
+            CaptureCount++;
             var focused = AutomationElement.FocusedElement;
             if (focused is not null)
             {
@@ -32,7 +49,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 if (editable is not null && focusedHost is not null && !IsPasswordField(editable)
                     && IsComposerShapeForHost(editable, focusedHost.Value))
                 {
-                    return CaptureSnapshot(editable, focusedHost.Value);
+                    return CaptureSnapshot(editable, focusedHost.Value, reuseLayout);
                 }
                 // A focused search, rename field or terminal must not redirect to a different composer.
                 if (editable is not null)
@@ -42,7 +59,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 }
             }
 
-            return TryCaptureActiveWindowComposer(focused);
+            return TryCaptureActiveWindowComposer(focused, reuseLayout);
         }
         catch (ElementNotAvailableException)
         {
@@ -60,9 +77,13 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         {
             return null;
         }
+        finally
+        {
+            if (LastCaptureStatus != "captured") InvalidateLayout();
+        }
     }
 
-    private ComposerSnapshot? TryCaptureActiveWindowComposer(AutomationElement? focused)
+    private ComposerSnapshot? TryCaptureActiveWindowComposer(AutomationElement? focused, bool reuseLayout)
     {
         var root = FindDocumentRoot(focused);
         if (root is null)
@@ -128,12 +149,12 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             LastCaptureStatus = "no_matching_editor";
             return null;
         }
-        return CaptureSnapshot(candidate, host.Value);
+        return CaptureSnapshot(candidate, host.Value, reuseLayout);
     }
 
-    private ComposerSnapshot? CaptureSnapshot(AutomationElement element, ComposerHost host)
+    private ComposerSnapshot? CaptureSnapshot(AutomationElement element, ComposerHost host, bool reuseLayout)
     {
-        var snapshot = CreateSnapshot(element, host);
+        var snapshot = CreateSnapshot(element, host, reuseLayout);
         LastCaptureStatus = snapshot is null ? "editor_unreadable" : "captured";
         return snapshot;
     }
@@ -164,11 +185,13 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return host switch
         {
             ComposerHost.Codex => (type == ControlType.Edit || type == ControlType.Group || type == ControlType.Document)
-                && classes.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Any(token => string.Equals(token, "ProseMirror", StringComparison.OrdinalIgnoreCase)),
+                && HasClassToken(classes, "ProseMirror"),
             ComposerHost.Antigravity => type == ControlType.ComboBox
-                && classes.Contains("cursor-text", StringComparison.OrdinalIgnoreCase)
-                && classes.Contains("overflow-y-auto", StringComparison.OrdinalIgnoreCase),
+                && HasClassToken(classes, "cursor-text")
+                && HasClassToken(classes, "overflow-y-auto"),
+            ComposerHost.Hermes => type == ControlType.Edit
+                && HasClassToken(classes, "cursor-text")
+                && HasClassToken(classes, "overflow-y-auto"),
             _ => false
         };
     }
@@ -332,16 +355,19 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     internal static bool IsSupportedComposerShape(ControlType type, string? className, string? automationId)
     {
         var isProseMirror = (type == ControlType.Group || type == ControlType.Edit || type == ControlType.Document)
-            && (className ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Any(token => string.Equals(token, "ProseMirror", StringComparison.OrdinalIgnoreCase));
+            && HasClassToken(className, "ProseMirror");
         var isRootWebArea = type == ControlType.Document
             && string.Equals(automationId, "RootWebArea", StringComparison.OrdinalIgnoreCase);
-        var isAntigravityComposer = type == ControlType.ComboBox
-            && (className ?? string.Empty).Contains("cursor-text", StringComparison.OrdinalIgnoreCase)
-            && (className ?? string.Empty).Contains("overflow-y-auto", StringComparison.OrdinalIgnoreCase);
+        var isTokenizedComposer = (type == ControlType.ComboBox || type == ControlType.Edit)
+            && HasClassToken(className, "cursor-text")
+            && HasClassToken(className, "overflow-y-auto");
         return !isRootWebArea
-            && (isProseMirror || isAntigravityComposer);
+            && (isProseMirror || isTokenizedComposer);
     }
+
+    private static bool HasClassToken(string? className, string expected) =>
+        (className ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Any(token => string.Equals(token, expected, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsPasswordField(AutomationElement element)
     {
@@ -355,47 +381,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         }
     }
 
-    private static ComposerHost? TryGetComposerHost(AutomationElement element)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(element.Current.ProcessId);
-            var path = process.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return null;
-            }
+    private static ComposerHost? TryGetComposerHost(AutomationElement element) => TryGetComposerHost(element.Current.ProcessId);
 
-            if (string.Equals(process.ProcessName, "ChatGPT", StringComparison.OrdinalIgnoreCase)
-                && (path.Contains(@"\WindowsApps\OpenAI.Codex_", StringComparison.OrdinalIgnoreCase)
-                    || path.Contains(@"\OpenAI\Codex\", StringComparison.OrdinalIgnoreCase)))
-            {
-                return ComposerHost.Codex;
-            }
+    private static ComposerHost? TryGetComposerHost(int processId) => ComposerHostProcess.Identify(processId);
 
-            if (string.Equals(process.ProcessName, "Antigravity", StringComparison.OrdinalIgnoreCase)
-                && path.Contains(@"\Programs\antigravity\", StringComparison.OrdinalIgnoreCase))
-            {
-                return ComposerHost.Antigravity;
-            }
-
-            return null;
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-        catch (Win32Exception)
-        {
-            return null;
-        }
-    }
-
-    private static ComposerSnapshot? CreateSnapshot(AutomationElement element, ComposerHost host)
+    private ComposerSnapshot? CreateSnapshot(AutomationElement element, ComposerHost host, bool reuseLayout = false)
     {
         var text = ReadText(element, out var readMethod);
         if (text is null)
@@ -412,8 +402,16 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         }
 
         var hostWindow = FindHostWindow(element);
+        var current = new ComposerSnapshot(element, element.GetRuntimeId(), text, editorBounds,
+            element.Current.ProcessId, Host: host, HostWindow: hostWindow, EditorBounds: editorBounds, ReadMethod: readMethod);
+        var dpi = hostWindow == 0 ? 0 : GetDpiForWindow(hostWindow);
+        if (reuseLayout && _layoutCache.TryApply(current, dpi) is { } cached)
+            return cached;
+
+        LayoutCaptureCount++;
         var surfaceBounds = editorBounds;
         var toolbar = new ToolbarContext(null, [editorBounds]);
+        var layoutResolved = true;
         try
         {
             surfaceBounds = FindComposerSurfaceBounds(element, editorBounds);
@@ -427,7 +425,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     Rect? anchor = null;
                     foreach (var button in association.RowButtons)
                     {
-                        if ((host == ComposerHost.Antigravity || IsCodexModelAnchor(button))
+                        if ((host != ComposerHost.Codex || IsCodexModelAnchor(button))
                             && IsBetterToolbarAnchor(button, anchor, host))
                         {
                             anchor = button;
@@ -436,10 +434,15 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
                     toolbar = new ToolbarContext(anchor, association.OccupiedBounds);
                 }
+                else
+                {
+                    layoutResolved = false;
+                }
             }
 
             if (toolbar.OccupiedBounds is null)
             {
+                layoutResolved = false;
                 surfaceBounds = editorBounds;
                 toolbar = new ToolbarContext(null, [editorBounds]);
             }
@@ -448,22 +451,20 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             or ArgumentException or COMException)
         {
             // Layoutknoten können verschwinden, obwohl der separat geprüfte Editor weiterhin gültig ist.
+            layoutResolved = false;
             surfaceBounds = editorBounds;
             toolbar = new ToolbarContext(null, [editorBounds]);
         }
 
-        return new ComposerSnapshot(
-            element,
-            element.GetRuntimeId(),
-            text,
-            surfaceBounds,
-            element.Current.ProcessId,
-            toolbar.RightControlBounds,
-            host,
-            hostWindow,
-            editorBounds,
-            toolbar.OccupiedBounds,
-            readMethod);
+        var result = current with
+        {
+            Bounds = surfaceBounds,
+            RightControlBounds = toolbar.RightControlBounds,
+            OccupiedBounds = toolbar.OccupiedBounds
+        };
+        if (layoutResolved) _layoutCache.Store(result, dpi);
+        else _layoutCache.Clear();
+        return result;
     }
 
     private static ComposerToolbarAssociation? FindAdjacentToolbar(AutomationElement composer, Rect editor, nint hostWindow)
@@ -480,7 +481,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         nearby.Inflate(200 * dpi / 96d, 100 * dpi / 96d);
 
         var scope = FindToolbarScope(composer, document);
-        var controls = scope.FindAll(TreeScope.Descendants, new OrCondition(
+        var controls = FindVisibleControls(scope, new OrCondition(
             new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
@@ -489,12 +490,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         var ancestors = GetAncestorRuntimeIds(composer);
         foreach (AutomationElement control in controls)
         {
-            if (control.Current.IsOffscreen) continue;
-            var type = control.Current.ControlType;
-            if (!IsToolbarObstacle(type, control.Current.ClassName, control.Current.AutomationId,
+            var type = control.Cached.ControlType;
+            if (!IsToolbarObstacle(type, control.Cached.ClassName, control.Cached.AutomationId,
                 ancestors.Contains(string.Join(",", control.GetRuntimeId())))) continue;
-            var aggregate = control.Current.BoundingRectangle;
-            var isEditor = type == ControlType.Edit || IsSupportedComposerShape(type, control.Current.ClassName, control.Current.AutomationId);
+            var aggregate = control.Cached.BoundingRectangle;
+            var isEditor = type == ControlType.Edit || IsSupportedComposerShape(type, control.Cached.ClassName, control.Cached.AutomationId);
             var visibleText = type == ControlType.Text && !editor.Contains(aggregate) && aggregate.IntersectsWith(nearby)
                 ? TryGetVisibleTextBounds(control, document) : null;
             foreach (var rectangle in visibleText ?? [aggregate])
@@ -511,6 +511,10 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         for (var depth = 0; depth < 20 && current is not null; depth++)
         {
             if (IsSameRuntimeId(current.GetRuntimeId(), document.GetRuntimeId())) break;
+            var candidateBounds = current.Current.BoundingRectangle;
+            if (IsComposerSurfaceCandidate(editor, candidateBounds)
+                && HasAssociatedControls(current, candidateBounds, editor))
+                return current;
             if (current.Current.ControlType == ControlType.Window && current.Current.BoundingRectangle.Contains(editor))
                 return current;
             current = TreeWalker.ControlViewWalker.GetParent(current);
@@ -590,14 +594,29 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return editorBounds;
     }
 
+    private static AutomationElementCollection FindVisibleControls(AutomationElement root, System.Windows.Automation.Condition condition)
+    {
+        var request = new CacheRequest { TreeScope = TreeScope.Element };
+        request.Add(AutomationElement.ControlTypeProperty);
+        request.Add(AutomationElement.ClassNameProperty);
+        request.Add(AutomationElement.AutomationIdProperty);
+        request.Add(AutomationElement.BoundingRectangleProperty);
+        request.Add(AutomationElement.IsOffscreenProperty);
+        using (request.Activate())
+        {
+            return root.FindAll(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.IsOffscreenProperty, false), condition));
+        }
+    }
+
     private static bool HasAssociatedControls(AutomationElement surface, Rect bounds, Rect editor)
     {
-        var buttons = surface.FindAll(TreeScope.Descendants,
+        var buttons = FindVisibleControls(surface,
             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
         foreach (AutomationElement button in buttons)
         {
-            var controlBounds = button.Current.BoundingRectangle;
-            if (!button.Current.IsOffscreen && !controlBounds.IsEmpty
+            var controlBounds = button.Cached.BoundingRectangle;
+            if (!controlBounds.IsEmpty
                 && bounds.Contains(controlBounds) && !editor.IntersectsWith(controlBounds))
                 return true;
         }
@@ -645,8 +664,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 return new ToolbarContext(null, [composer.Current.BoundingRectangle]);
             }
 
-            var controls = searchRoot.FindAll(
-                TreeScope.Descendants,
+            var controls = FindVisibleControls(searchRoot,
                 new OrCondition(
                     new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)));
@@ -660,19 +678,19 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             var ancestors = GetAncestorRuntimeIds(composer);
             foreach (AutomationElement button in controls)
             {
-                if (!IsToolbarObstacle(button.Current.ControlType, button.Current.ClassName, button.Current.AutomationId,
+                if (!IsToolbarObstacle(button.Cached.ControlType, button.Cached.ClassName, button.Cached.AutomationId,
                     ancestors.Contains(string.Join(",", button.GetRuntimeId())))) continue;
-                var bounds = button.Current.BoundingRectangle;
-                if (!bounds.IsEmpty && !button.Current.IsOffscreen && bounds.IntersectsWith(composerBounds))
+                var bounds = button.Cached.BoundingRectangle;
+                if (!bounds.IsEmpty && !button.Cached.IsOffscreen && bounds.IntersectsWith(composerBounds))
                 {
-                    var visibleText = button.Current.ControlType == ControlType.Text && !editorBounds.Contains(bounds)
+                    var visibleText = button.Cached.ControlType == ControlType.Text && !editorBounds.Contains(bounds)
                         ? TryGetVisibleTextBounds(button, document) : null;
                     occupied.AddRange(visibleText ?? [bounds]);
                 }
 
                 if (bounds.IsEmpty
-                    || button.Current.ControlType != ControlType.Button
-                    || button.Current.IsOffscreen
+                    || button.Cached.ControlType != ControlType.Button
+                    || button.Cached.IsOffscreen
                     || bounds.Width < 24
                     || bounds.Left < minimumLeft
                     || bounds.Left >= composerBounds.Right
@@ -682,7 +700,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     continue;
                 }
 
-                var isAnchor = host == ComposerHost.Antigravity
+                var isAnchor = host != ComposerHost.Codex
                     || IsCodexModelAnchor(bounds);
                 if (isAnchor && IsBetterToolbarAnchor(bounds, best, host))
                 {
@@ -731,7 +749,8 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     private static string? ReadText(AutomationElement element, out ComposerReadMethod readMethod)
     {
         var isStructured = IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Codex)
-            || IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Antigravity);
+            || IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Antigravity)
+            || IsComposerShapeForHost(element.Current.ControlType, element.Current.ClassName, ComposerHost.Hermes);
         if (!isStructured && element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
         {
             readMethod = ComposerReadMethod.ValuePattern;

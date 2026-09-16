@@ -80,6 +80,22 @@ public sealed class CodexComposerShapeTests
     }
 
     [Fact]
+    public void HermesKeepsLeftmostRightSideControl()
+    {
+        var voice = new System.Windows.Rect(2280, 1093, 48, 48);
+        var send = new System.Windows.Rect(2395, 1093, 56, 57);
+
+        Assert.True(CodexComposerAccessor.IsBetterToolbarAnchor(
+            voice,
+            send,
+            ComposerHost.Hermes));
+        Assert.False(CodexComposerAccessor.IsBetterToolbarAnchor(
+            send,
+            voice,
+            ComposerHost.Hermes));
+    }
+
+    [Fact]
     public void ProseMirrorGroup_IsRecognizedAsCodexComposer()
     {
         Assert.True(CodexComposerAccessor.IsSupportedComposerShape(
@@ -168,6 +184,37 @@ public sealed class CodexComposerShapeTests
         Assert.True(CodexComposerAccessor.IsSupportedComposerShape(
             ControlType.ComboBox,
             "max-h-[300px] cursor-text overflow-y-auto text-sm",
+            string.Empty));
+    }
+
+    [Fact]
+    public void HermesCursorTextEdit_IsRecognizedAsComposer()
+    {
+        const string classes = "min-h-[1.625rem] cursor-text overflow-y-auto whitespace-pre-wrap";
+
+        Assert.True(CodexComposerAccessor.IsComposerShapeForHost(
+            ControlType.Edit,
+            classes,
+            ComposerHost.Hermes));
+        Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
+            ControlType.ComboBox,
+            classes,
+            ComposerHost.Hermes));
+        Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
+            ControlType.Edit,
+            "ui-prompt-input-editor__input overflow-y-auto",
+            ComposerHost.Hermes));
+        Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
+            ControlType.Edit,
+            "not-cursor-textual overflow-y-autocomplete",
+            ComposerHost.Hermes));
+        Assert.True(CodexComposerAccessor.IsSupportedComposerShape(
+            ControlType.Edit,
+            classes,
+            string.Empty));
+        Assert.False(CodexComposerAccessor.IsSupportedComposerShape(
+            ControlType.Edit,
+            "not-cursor-textual overflow-y-autocomplete",
             string.Empty));
     }
 

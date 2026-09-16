@@ -5,6 +5,8 @@ namespace CodexLanguageFix.Contracts;
 public interface IComposerAccessor
 {
     ComposerSnapshot? TryCaptureFocusedComposer();
+    ComposerSnapshot? TryPollFocusedComposer();
+    void InvalidateLayout();
     ComposerSnapshot? TryRefresh(ComposerSnapshot snapshot);
     bool TryReplace(ComposerSnapshot snapshot, string expectedText, string replacement);
     ComposerWriteResult? LastWriteResult => null;
@@ -13,7 +15,8 @@ public interface IComposerAccessor
 public enum ComposerHost
 {
     Codex,
-    Antigravity
+    Antigravity,
+    Hermes
 }
 
 public sealed record ComposerSnapshot(

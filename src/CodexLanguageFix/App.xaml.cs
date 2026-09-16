@@ -14,6 +14,7 @@ public partial class App : System.Windows.Application
     private CodexAppServerClient? _codexAppServerClient;
     private TrayController? _tray;
     private CorrectionCoordinator? _coordinator;
+    private MemoryDiagnostics? _memoryDiagnostics;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -68,8 +69,10 @@ public partial class App : System.Windows.Application
         var lunaProvider = new LunaCorrectionProvider(_codexAppServerClient, localizer);
         _tray = new TrayController(settings, settingsService, autostartService, localizer);
         var overlay = new OverlayWindow(localizer);
+        var composerAccessor = new CodexComposerAccessor();
+        _memoryDiagnostics = new MemoryDiagnostics(composerAccessor);
         _coordinator = new CorrectionCoordinator(
-            new CodexComposerAccessor(),
+            composerAccessor,
             [languageToolProvider, lunaProvider],
             lunaProvider,
             overlay,
@@ -85,6 +88,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _coordinator?.Dispose();
+        _memoryDiagnostics?.Dispose();
         _tray?.Dispose();
         _languageToolClient?.Dispose();
         _codexAppServerClient?.Dispose();

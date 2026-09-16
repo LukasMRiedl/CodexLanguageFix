@@ -2,11 +2,11 @@
 
 [English](README.md) · **Deutsch**
 
-Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App und in Antigravity. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen OpenAI-API-Schlüssel, zusätzliche API-Abrechnung oder einen eigenen Server.
+Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der OpenAI-Codex-Desktop-App, Antigravity und Hermes. Als Anbieter stehen die kostenlose öffentliche LanguageTool-API und GPT-5.6 Luna über die offizielle Codex-ChatGPT-OAuth-Sitzung zur Verfügung. Die App benötigt weder ein Codex-Plugin noch eine Browsererweiterung, einen OpenAI-API-Schlüssel, zusätzliche API-Abrechnung oder einen eigenen Server.
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand enthält den **Release-Kandidaten 1.3.1-rc.6**: kein Originaltext-Fenster mehr, längere rein lesende Bestätigung nach dem Einsetzen und keine unnötigen MCP-/Plugin-Hilfsprozesse für Luna. 402 Offline-Tests bestehen. Nachweise und Grenzen stehen im [Einsetz- und Speicherbericht](docs/insertion-ram-repair-2026-09-10.md). Frühere Prüfberichte bleiben erhalten. Historische Nachrichten-Editdialoge, gemischte DPI-Werte und Bildschirmrandfälle wurden nicht erneut geprüft. RC6 ist nicht auf GitHub veröffentlicht und kein vollständig abgenommener stabiler Release.
+Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.7**: Hermes-Unterstützung, weniger wiederholte UI-Automation, eine Ladeanimation nur bei sichtbarer Korrektur und eine Einzeldatei ohne interne Assembly-Kompression. Alle 470 Offline-Testfälle sowie gezielte Luna-, LanguageTool- und Hermes-Liveprüfungen bestehen. Ein kurzer Hintergrundvergleich ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. RC7 ist lokal installiert und technisch geprüft; Referenzchips, zusätzliche DPI-/Layoutvarianten und die Dauerabnahme bleiben offen. Nachweise und Grenzen stehen im [aktuellen RAM-Bericht](docs/ram-optimization-2026-09-13.md). Der [frühere Einsetz- und Speicherbericht](docs/insertion-ram-repair-2026-09-10.md) bleibt verfügbar. Dieser Entwicklungsstand ist nicht als stabiler Release veröffentlicht.
 
 ## Funktionen
 
@@ -83,6 +83,7 @@ Die selbstenthaltende Einzeldatei liegt anschließend unter:
 
 - OpenAI Codex Desktop für Windows
 - Antigravity für Windows
+- Hermes für Windows
 
 Die Erkennung verwendet zugängliche UI-Strukturen und keine fest codierten Bildschirmkoordinaten.
 

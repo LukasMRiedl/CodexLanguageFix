@@ -2,11 +2,11 @@
 
 **English** · [Deutsch](README.de.md)
 
-A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop and Antigravity. Choose between the free public LanguageTool API and GPT-5.6 Luna through the official Codex ChatGPT OAuth session. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
+A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop, Antigravity, and Hermes. Choose between the free public LanguageTool API and GPT-5.6 Luna through the official Codex ChatGPT OAuth session. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source contains **release candidate 1.3.1-rc.6**: no original-text recovery window, longer read-only insertion verification and no unnecessary MCP/plugin helper processes for Luna. All 402 offline tests pass. See the [insertion and memory report](docs/insertion-ram-repair-2026-09-10.md) for evidence and limitations. Earlier reports remain available. Historical edit dialogs, mixed-DPI monitors and screen-edge cases were not retested. RC6 is not published on GitHub and is not a fully accepted stable release.
+The current source is **release candidate 1.3.1-rc.7** with Hermes support, fewer repeated UI Automation operations, a busy animation limited to visible corrections, and a single-file build without internal assembly compression. All 470 offline test cases and targeted live Luna, LanguageTool, and Hermes checks pass. A short background comparison measured approximately 49% less private memory and 43% less working set; the **80% target is not met**. RC7 is installed locally and technically verified; reference chips, additional DPI/layout variants, and endurance acceptance remain outstanding. See the [current memory report](docs/ram-optimization-2026-09-13.md) for evidence and limitations. The [earlier insertion and memory report](docs/insertion-ram-repair-2026-09-10.md) remains available. This development build has not been published as a stable release.
 
 ## Features
 
@@ -90,6 +90,7 @@ The resulting self-contained executable is written to:
 
 - OpenAI Codex Desktop for Windows
 - Antigravity for Windows
+- Hermes for Windows
 
 Application detection relies on accessible UI structures rather than hard-coded screen coordinates.
 

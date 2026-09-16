@@ -1,0 +1,18 @@
+# RAM-Messung unter Windows
+
+PowerShell 7 verwenden. Die Skripte greifen über Windows Toolhelp auf den Prozessbaum zu; CIM/WMI und zusätzliche Pakete sind nicht erforderlich. Die Messung verändert weder App noch Speicherverwaltung. Die Aufwärmzeit kommt zur Messdauer hinzu. Der Messprozess gehört nicht zum App-Prozessbaum und wird nicht mitgezählt.
+
+Den bestehenden Release vor Änderungen unverändert in einem separaten Artefaktordner sichern. Vergleich und Kandidat mit derselben Veröffentlichungsart (insbesondere selbstständig/einzelne Datei), Konfiguration, Hostversion und identischen Eingaben nacheinander ausführen. App frisch starten, jeweils die gesamte Sitzung mit demselben Szenario verbringen und ihre Prozess-ID einsetzen. Die Ausgabeverzeichnisse vorher anlegen. In Labels nur sachliche Versions-/Szenariobezeichnungen verwenden, keine Textinhalte oder persönlichen Daten.
+
+```powershell
+./scripts/measure-memory.ps1 -RootProcessId 1234 -Scenario foreign-foreground -BuildLabel baseline -HostVersion '<Hostversion>' -Configuration 'Release-self-contained-single-file' -WarmupSeconds 120 -DurationSeconds 1800 -OutputPath ./benchmark-results/baseline-foreign-1.json
+./scripts/measure-memory.ps1 -RootProcessId 5678 -Scenario foreign-foreground -BuildLabel candidate -HostVersion '<identische Hostversion>' -Configuration 'Release-self-contained-single-file' -WarmupSeconds 120 -DurationSeconds 1800 -OutputPath ./benchmark-results/candidate-foreign-1.json
+./scripts/compare-memory.ps1 -BaselinePath ./benchmark-results/baseline-foreign-1.json -CandidatePath ./benchmark-results/candidate-foreign-1.json -OutputPath ./benchmark-results/comparison-foreign-1.json
+./scripts/test-memory-tools.ps1
+```
+
+Für `foreign-foreground` eine fremde Anwendung im Vordergrund halten; für `unchanged-composer` den unveränderten Composer sichtbar halten. Pro Szenario drei gepaarte Läufe mit je 1.800 Sekunden sowie einen gepaarten Dauertest mit je 86.400 Sekunden ausführen. Alle Paare müssen bestehen; Ergebnisse nicht über Szenarien oder Wiederholungen mitteln. Den Dauertest ausdrücklich separat starten, da Rechner und App dafür entsprechend lange verfügbar bleiben müssen. Korrekturen mit beiden Anbietern, langen Unterhaltungen und 20.000-Zeichen-Entwürfen sind separate aktive Szenarien; deren Antwortzeiten zusätzlich mit den vorhandenen Funktionstests erfassen.
+
+Die Auswertung weist privaten Speicher und Working Set in MiB sowie Reduktion in Prozent aus. Für beide Größen müssen Median und 95. Perzentil jeweils höchstens 20 % des Vergleichswerts betragen. Das Perzentil verwendet nearest rank, der Median bei gerader Anzahl das Mittel der beiden mittleren Werte. Exitcode 0 bedeutet bestanden, 2 bedeutet Ziel verfehlt bzw. Messung unvollständig, 1 bedeutet ungültige/inkompatible Eingabe. Vergleichsskripte dürfen einen fehlgeschlagenen Exitcode nicht ignorieren.
+
+Erfasst werden ausschließlich aggregierte Speicherwerte, Prozessanzahl, Zeitpunkte und explizite Versuchsmetadaten. Pfade, Prozessnamen, Prozess-IDs, Befehlszeilen und Inhalte werden nicht gespeichert. Kurzlebige Prozesse zwischen zwei Sekundenpunkten sind nicht erfassbar; geteilter residenter Speicher kann in der Summe der Working Sets mehrfach enthalten sein. Gleiche Messbedingungen sind daher zwingend. Bereits bekannte Nachkommen bleiben nach dem Ende ihres Elternprozesses erfasst; PID-Wiederverwendung wird anhand der Startzeit erkannt. Beendigung des Hauptprozesses, fehlende Zugriffsrechte oder eine verspätete Abtastung um mehr als 500 ms machen den Lauf ungültig. Das Werkzeug trennt keine verwalteten/native Allokationen: Dafür separat die vorhandenen .NET-Diagnosewerkzeuge verwenden und solche Diagnoseprozesse nicht während der RAM-Abnahmemessung anhängen.

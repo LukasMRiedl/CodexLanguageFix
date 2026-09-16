@@ -182,6 +182,14 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Antigravity);
     }
 
+    // Opt in with HERMES_DESKTOP_LIVE_TEST=1 after preparing the exact sentence fixture in Hermes.
+    [Fact]
+    public void PreparedSyntheticHermesSentence_IsCorrectedAndUndoneThroughOwnOverlay()
+    {
+        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_LIVE_TEST") != "1") return;
+        RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Hermes);
+    }
+
     // Read-only discovery: CODEX_LANGUAGE_FIX_DESKTOP_FIXTURE_PROBE=1. Never authorizes a write or new fixture variant.
     [Fact]
     public void PreparedSyntheticParagraphList_ReadOnlyReportsVerifiedFixtureEncoding()
@@ -304,6 +312,14 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     {
         if (Environment.GetEnvironmentVariable("ANTIGRAVITY_DESKTOP_NATIVE_TEST") != "1") return;
         RunNativeRoundTrip(SentenceFixtures, ComposerHost.Antigravity);
+    }
+
+    // Opt in with HERMES_DESKTOP_NATIVE_TEST=1; only the exact Hermes sentence fixture is authorized.
+    [Fact]
+    public void PreparedSyntheticHermesSentence_DirectNativeRoundTrip()
+    {
+        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_NATIVE_TEST") != "1") return;
+        RunNativeRoundTrip(SentenceFixtures, ComposerHost.Hermes);
     }
 
     private void RunNativeRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)

@@ -47,7 +47,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _logger = logger;
         _localizer = localizer;
         _focusWatcher = new CodexFocusWatcher(dispatcher);
-        _focusWatcher.Changed += (_, _) => RefreshOverlay();
+        _focusWatcher.Changed += FocusWatcher_OnChanged;
         _fallbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(750), DispatcherPriority.Background, (_, _) => RefreshOverlay(), dispatcher);
         _overlay.CorrectRequested += async (_, _) => await CorrectAsync();
         _overlay.UndoRequested += (_, _) => Undo();
@@ -61,6 +61,12 @@ public sealed class CorrectionCoordinator : IDisposable
     public void Start()
     {
         _fallbackTimer.Start();
+        RefreshOverlay();
+    }
+
+    private void FocusWatcher_OnChanged(object? sender, EventArgs e)
+    {
+        _composerAccessor.InvalidateLayout();
         RefreshOverlay();
     }
 
@@ -83,13 +89,14 @@ public sealed class CorrectionCoordinator : IDisposable
     {
         if (!_tray.Enabled)
         {
+            _composerAccessor.InvalidateLayout();
             _requestCancellation?.Cancel();
             _visibleSnapshot = null;
             _overlay.Hide();
             return;
         }
 
-        var snapshot = _composerAccessor.TryCaptureFocusedComposer();
+        var snapshot = _composerAccessor.TryPollFocusedComposer();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
             LogCaptureStatus();
@@ -395,7 +402,12 @@ public sealed class CorrectionCoordinator : IDisposable
         _disposed = true;
         _requestCancellation?.Cancel();
         _fallbackTimer.Stop();
+        _focusWatcher.Changed -= FocusWatcher_OnChanged;
         _focusWatcher.Dispose();
+        _composerAccessor.InvalidateLayout();
+        _visibleSnapshot = null;
+        _requestSnapshot = null;
+        _undo = null;
         _tray.ProviderChanged -= Tray_OnProviderChanged;
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _overlay.Close();
