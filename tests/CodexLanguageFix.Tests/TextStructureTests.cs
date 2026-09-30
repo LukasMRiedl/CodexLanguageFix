@@ -164,15 +164,16 @@ public sealed class TextStructureTests
         public int Calls { get; private set; }
         public Task<CodexAccountState> GetAccountAsync(CancellationToken token) => Task.FromResult(new CodexAccountState(true, true));
         public Task ConnectChatGptAsync(CancellationToken token) => Task.CompletedTask;
-        public Task<bool> SupportsLunaAsync(CancellationToken token) => Task.FromResult(true);
-        public Task<string> RunCorrectionAsync(string text, CancellationToken token)
+        public Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken token) =>
+            Task.FromResult(new LunaModelSelection("gpt-5.6-luna", "low", "priority"));
+        public Task<string> RunCorrectionAsync(string text, LunaModelSelection selection, CancellationToken token)
         {
             Calls++;
             return Task.FromResult(JsonSerializer.Serialize(new { corrected_text = output }));
         }
 
         public Task<string> RunStructuredCorrectionAsync(string inputJson, JsonElement schema,
-            string instructions, string effort, CancellationToken token)
+            string instructions, LunaModelSelection selection, CancellationToken token)
         {
             Calls++;
             return Task.FromResult(schema.GetProperty("properties").TryGetProperty("edits", out _)

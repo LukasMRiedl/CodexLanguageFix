@@ -54,7 +54,7 @@ public sealed class LiveBenchmarkHarnessTests
     {
         var configuration = new LiveBenchmarkConfiguration(
             ["baseline"],
-            ["none"],
+            ["low"],
             32,
             1,
             2,
@@ -190,7 +190,7 @@ public sealed class LiveBenchmarkHarnessTests
             32,
             32,
             "hash",
-            "gpt-5.6-luna",
+            "selected-luna",
             "priority",
             1,
             2,
@@ -290,16 +290,16 @@ public sealed class LiveBenchmarkHarnessTests
             32,
             1,
             "hash",
-            "gpt-5.6-luna",
+            "selected-luna",
             "priority",
             1,
             2,
             true,
             [new LiveBenchmarkPromptMetadata("baseline", "prompt-hash", 10)],
-            ["none"],
-            [new LiveBenchmarkCapability("none", true, null)],
+            ["low"],
+            [new LiveBenchmarkCapability("low", true, null)],
             [],
-            [new LiveBenchmarkObservation("luna", "baseline", "none", 1, "DE001", "de", "spelling", false, true, false, 10, 9, null)],
+            [new LiveBenchmarkObservation("luna", "baseline", "low", 1, "DE001", "de", "spelling", false, true, false, 10, 9, null)],
             []);
 
         var json = JsonSerializer.Serialize(report);
@@ -325,13 +325,13 @@ public sealed class LiveBenchmarkHarnessTests
             32,
             1,
             "hash",
-            "gpt-5.6-luna",
+            "selected-luna",
             "priority",
             1,
             2,
             true,
             [],
-            ["none"],
+            ["low"],
             [],
             [],
             [],
@@ -341,7 +341,7 @@ public sealed class LiveBenchmarkHarnessTests
         };
         var configuration = new LiveBenchmarkConfiguration(
             ["baseline"],
-            ["none"],
+            ["low"],
             32,
             1,
             2,
@@ -361,6 +361,35 @@ public sealed class LiveBenchmarkHarnessTests
             LiveBenchmarkHardAssertions.Validate(report, configuration, 1));
 
         Assert.Contains("LanguageTool", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LanguageToolComparisonCellSelection_SkipsUnsafeLunaCells()
+    {
+        var unsafeCell = Cell("baseline", "low", correctedExact: 6, p95: 300);
+        var unsafeObservation = new LiveBenchmarkObservation(
+            "luna",
+            "baseline",
+            "low",
+            1,
+            "DE001",
+            "de",
+            "spelling",
+            false,
+            true,
+            false,
+            100,
+            90,
+            null)
+        {
+            SafetyCritical = true
+        };
+
+        var comparisonCell = LiveBenchmarkRunner.SelectSafeLanguageToolComparisonCell(
+            [unsafeCell],
+            [unsafeObservation]);
+
+        Assert.Null(comparisonCell);
     }
 
     private static LiveBenchmarkCellReport Cell(

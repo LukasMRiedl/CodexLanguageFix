@@ -2,17 +2,17 @@
 
 **English** · [Deutsch](README.de.md)
 
-A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop, Antigravity, and Hermes. Choose between the free public LanguageTool API and GPT-5.6 Luna through the official Codex ChatGPT OAuth session. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
+A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop, Antigravity, and Hermes. Choose between the free public LanguageTool API and Luna through the official Codex ChatGPT OAuth session. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source is **release candidate 1.3.1-rc.7** with Hermes support, fewer repeated UI Automation operations, a busy animation limited to visible corrections, and a single-file build without internal assembly compression. All 470 offline test cases and targeted live Luna, LanguageTool, and Hermes checks pass. A short background comparison measured approximately 49% less private memory and 43% less working set; the **80% target is not met**. RC7 is installed locally and technically verified; reference chips, additional DPI/layout variants, and endurance acceptance remain outstanding. See the [current memory report](docs/ram-optimization-2026-09-13.md) for evidence and limitations. The [earlier insertion and memory report](docs/insertion-ram-repair-2026-09-10.md) remains available. This development build has not been published as a stable release.
+The current source is **release candidate 1.3.1-rc.8**. It selects the newest Luna model offered by the installed Codex runtime that supports low reasoning with Fast Mode (`priority`). The `low` production profile passed live qualification with `gpt-6-luna`, 128 corpus cases and unchanged safety gates; see the [runtime report](docs/desktop-runtime-2026-09-30.md) for evidence and limitations. The earlier RC7 memory comparison measured approximately 49% less private memory and 43% less working set, short of the **80% target**. See the [memory report](docs/ram-optimization-2026-09-13.md) for its evidence and limitations. This development build has not been published as a stable release.
 
 ## Features
 
 - A subtle `Aa` button dynamically appears inside the active prompt bar.
 - One click checks spelling, grammar, punctuation, and style.
-- LanguageTool remains the default provider. OpenAI Luna can be selected from the system tray. Production invokes the qualified `baseline / none / full-v1` profile of `gpt-5.6-luna` with Fast mode; experimental profiles never activate automatically.
+- LanguageTool remains the default provider. OpenAI Luna can be selected from the system tray. Production requests the `baseline / low / full-v1` profile with Fast Mode (`priority`) on the newest compatible model offered by the installed Codex runtime. This profile was tested live with `gpt-6-luna` on 30 September 2026. Experimental profiles never activate automatically.
 - Luna uses the official Codex App Server and its managed ChatGPT OAuth flow. The app never reads or stores OAuth tokens.
 - German and English are detected automatically, with `de-DE` and `en-US` as the preferred variants.
 - The entire interface is available in English and German. It follows the Windows display language by default and can be switched at any time from the system tray menu.
@@ -34,17 +34,13 @@ The current source is **release candidate 1.3.1-rc.7** with Hermes support, fewe
 
 The app does not require administrator privileges. Its system tray menu lets you select the correction provider, connect OpenAI, test the selected provider, pause or exit the app, and change automatic startup.
 
-LanguageTool works without additional software. The optional Luna provider requires an installed, current official Codex runtime and a ChatGPT account available to Codex. If Luna or Fast mode is unavailable, the prompt remains unchanged; Codex Language Fix never silently falls back to another model, mode, or provider.
-
-If the active Codex model catalog deliberately omits Luna's no-reasoning mode, Codex Language Fix creates an app-private catalog copy under `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` and enables it only for its own App Server process. The global Codex catalog is never modified, so this additional mode does not appear in Codex Desktop.
-
-If the external catalog setting is later removed, an existing valid app-private copy is reused without modification. The app does not import or convert the global model cache; an explicitly broken catalog setting remains an error.
+LanguageTool works without additional software. The optional Luna provider requires the official Codex Desktop installation and a ChatGPT account available to Codex; Codex Desktop can remain closed while the app runs. At App Server startup, the app selects the newest Luna model offered by the installed official runtime that supports low reasoning and Fast Mode (`priority`). It keeps this selection for the runtime and resolves it again after the runtime or account context resets, so corrections do not repeat model-list discovery. If no compatible model is available, the prompt remains unchanged; Codex Language Fix never silently falls back to another mode or provider.
 
 The published executable is currently not code-signed. Windows may therefore display a security warning the first time you launch it.
 
 ## Privacy
 
-Only after you click the correction button does the app send the current prompt to the selected provider. LanguageTool requests go over HTTPS to `https://api.languagetool.org/v2/check`. Luna requests use ChatGPT OAuth through the official Codex App Server; the app has no API-key path. Production uses the qualified `baseline / none / full-v1` profile in an ephemeral `gpt-5.6-luna` thread with Fast mode, a read-only/no-network sandbox, and explicit instructions prohibiting tools. The App Server and one empty single-use thread may be prepared without composer content, but no correction or local draft starts while you type. Segment and span-edit protocols as well as `low` and `medium` reasoning remain disabled. Technical spans are replaced locally with random placeholders before Luna sees the text and restored only after strict validation.
+Only after you click the correction button does the app send the current prompt to the selected provider. LanguageTool requests go over HTTPS to `https://api.languagetool.org/v2/check`. Luna requests use ChatGPT OAuth through the official Codex App Server; the app has no API-key path. At App Server startup, the app selects the newest Luna model offered by the installed official runtime that supports low reasoning and Fast Mode (`priority`), then keeps that profile for the server runtime. It resolves the profile again after a runtime or account-context reset, so corrections do not repeat model-list discovery. Production requests `baseline / low / full-v1`. Each correction uses an ephemeral thread with a read-only/no-network sandbox and explicit instructions prohibiting tools. The App Server and one empty single-use thread may be prepared without composer content, but no correction or local draft starts while you type. Segment and span-edit protocols as well as `medium` reasoning remain disabled. Technical spans are replaced locally with random placeholders before Luna sees the text and restored only after strict validation.
 
 Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never recorded in production logs. Up to 64 validated Luna results are cached only in memory and discarded when the app exits. Local diagnostic logs contain only technical metadata such as provider, timestamp, duration, status code, character count, and change count. They are deleted after seven days. Explicitly enabled UI diagnostics may output only pre-verified synthetic fixture data.
 
@@ -74,13 +70,13 @@ dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj `
   -p:PublishSingleFile=true
 ```
 
-The external quality and latency benchmark is intentionally opt-in and requires the Codex ChatGPT OAuth session. Its fixed, deterministic four-stage search evaluates all 15 prompt/reasoning combinations, selects one prompt per reasoning level, compares all six output protocols on long texts, and directly verifies the winner against `baseline / none / full-v1`. Search stages use two concurrent Luna requests; the final bilingual LanguageTool comparison runs without competing Luna load and respects LanguageTool's public rate limit. There is no global time cutoff: every stage completes and writes a durable schema-v3 report without raw text. With the observed roughly seven seconds per Luna correction, the qualified run completed 144 planned measurements in 15 minutes 44 seconds.
+The external quality and latency benchmark is intentionally opt-in and requires the official Codex Desktop installation and its ChatGPT OAuth session; Codex Desktop can remain closed. The production qualification script measures only `baseline / low / full-v1` on the newest Luna model offered by the installed runtime that supports low reasoning and Fast Mode (`priority`). It records the selected model in its schema-v3 report and includes no fallback to unsupported reasoning levels or protocols. The [30 September 2026 run](docs/desktop-runtime-2026-09-30.md) passed every safety gate with `gpt-6-luna`; Luna was more accurate, but slower, than LanguageTool on the paired sample. Exploratory matrix settings are checked against the same runtime selection and unsupported efforts fail closed. Reports contain no raw text.
 
 ```powershell
 .\scripts\run-full-luna-qualification.ps1
 ```
 
-The qualification of 20 August 2026 selected `baseline / none / full-v1`. It passed every safety gate and achieved an F0.5 score of 0.75 versus LanguageTool's 0.25 on the final paired sample. Luna was not faster: its warm p50 was 7.97 seconds versus 0.72 seconds for LanguageTool, about 11.1 times slower. Segment and span-edit protocols therefore were not activated. A future profile is described as faster only if both paired p50 and p95 latency gates pass; otherwise maximum safe quality decides the Luna profile.
+The historical qualification run of 20 August 2026 measured the then-fixed `gpt-5.6-luna` profile `baseline / none / full-v1`. It passed every safety gate and achieved an F0.5 score of 0.75 versus LanguageTool's 0.25 on the final paired sample. Luna was not faster: its warm p50 was 7.97 seconds versus 0.72 seconds for LanguageTool, about 11.1 times slower. Segment and span-edit protocols therefore were not activated. These measurements describe that dated run, not a hard-coded model choice in the current app.
 
 The resulting self-contained executable is written to:
 

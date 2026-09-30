@@ -41,16 +41,16 @@ public sealed class CodexAppServerProtocolTests
     public void ModelList_DetectsOnlyExactLunaFastCapability()
     {
         using var supported = JsonDocument.Parse("""
-            {"data":[{"model":"gpt-5.6-luna","supportedReasoningEfforts":[{"reasoningEffort":"none","description":"No reasoning"}],"serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]}]}
+            {"data":[{"model":"gpt-5.6-luna","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"No reasoning"}],"serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]}]}
             """);
         using var wrongEffort = JsonDocument.Parse("""
             {"data":[{"model":"gpt-5.6-luna","supportedReasoningEfforts":[{"reasoningEffort":"max","description":"Deep"}],"serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]}]}
             """);
         using var wrongModel = JsonDocument.Parse("""
-            {"data":[{"model":"gpt-5.6-sol","supportedReasoningEfforts":[{"reasoningEffort":"none","description":"No reasoning"}],"serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]}]}
+            {"data":[{"model":"gpt-5.6-sol","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"No reasoning"}],"serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]}]}
             """);
         using var missingFastTier = JsonDocument.Parse("""
-            {"data":[{"model":"gpt-5.6-luna","supportedReasoningEfforts":[{"reasoningEffort":"none","description":"No reasoning"}],"serviceTiers":[]}]}
+            {"data":[{"model":"gpt-5.6-luna","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"No reasoning"}],"serviceTiers":[]}]}
             """);
 
         Assert.True(CodexAppServerClient.ModelListContainsLuna(supported.RootElement));

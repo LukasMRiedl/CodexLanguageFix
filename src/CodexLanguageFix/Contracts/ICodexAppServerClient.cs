@@ -9,9 +9,9 @@ public interface ICodexAppServerClient : IDisposable
 
     Task ConnectChatGptAsync(CancellationToken cancellationToken);
 
-    Task<bool> SupportsLunaAsync(CancellationToken cancellationToken);
+    Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken);
 
-    Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken);
+    Task<string> RunCorrectionAsync(string protectedText, LunaModelSelection selection, CancellationToken cancellationToken);
 }
 
 internal interface IStructuredCodexCorrectionClient
@@ -20,6 +20,6 @@ internal interface IStructuredCodexCorrectionClient
         string inputJson,
         JsonElement outputSchema,
         string developerInstructions,
-        string effort,
+        LunaModelSelection selection,
         CancellationToken cancellationToken);
 }

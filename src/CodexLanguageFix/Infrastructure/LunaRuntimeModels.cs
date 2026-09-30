@@ -1,7 +1,7 @@
 namespace CodexLanguageFix.Infrastructure;
 
 /// <summary>
-/// Das durch den vollständigen Live-Lauf qualifizierte Produktionsprofil.
+/// Das Produktionsprofil für die automatische Luna-Auswahl.
 /// Alle produktiven Luna-Komponenten beziehen Prompt, Denkstufe und Protokoll
 /// aus dieser einen unveränderlichen Quelle.
 /// </summary>
@@ -17,7 +17,7 @@ internal sealed record LunaProductionConfiguration(
     internal static LunaProductionConfiguration Qualified { get; } = new(
         PromptVariant: "baseline",
         DeveloperInstructions: LunaPromptCatalog.Baseline,
-        Effort: "none",
+        Effort: "low",
         ServiceTier: "priority",
         OutputProtocol: LunaOutputProtocol.FullText,
         ProtocolName: "full-v1",
@@ -30,7 +30,7 @@ internal interface ILunaTimedTransportClient
         string inputJson,
         System.Text.Json.JsonElement outputSchema,
         string developerInstructions,
-        string effort,
+        CodexLanguageFix.Core.LunaModelSelection selection,
         CancellationToken cancellationToken,
         bool replenishPreparedThread = false);
 }
@@ -91,4 +91,6 @@ internal sealed record LunaTransportExecution(
 
 internal sealed record PreparedLunaThread(
     LunaCorrectionProfile Profile,
-    string ThreadId);
+    string ThreadId,
+    JsonRpcLineConnection Connection,
+    int Generation);

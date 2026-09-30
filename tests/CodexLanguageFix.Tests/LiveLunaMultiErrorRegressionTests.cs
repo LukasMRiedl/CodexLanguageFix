@@ -32,8 +32,9 @@ public sealed class LiveLunaMultiErrorRegressionTests(ITestOutputHelper output)
         using var client = new CodexAppServerClient(LunaLiveRuntime.CreateDirectory(), localizer);
         Assert.True((await client.GetAccountAsync(CancellationToken.None)).IsChatGpt,
             "Für diese vier Live-Fälle ist das vorhandene ChatGPT-OAuth-Konto erforderlich.");
-        Assert.True(await client.SupportsLunaAsync(CancellationToken.None),
-            "Das unveränderte Luna-Produktionsprofil muss verfügbar sein.");
+        var selection = await client.ResolveLunaProfileAsync(CancellationToken.None);
+        Assert.Equal("low", selection.Effort);
+        Assert.Equal("priority", selection.ServiceTier);
         var provider = new LunaCorrectionProvider(client, localizer, cacheEnabled: false);
         using var concurrency = new SemaphoreSlim(2);
         var observations = await Task.WhenAll(Cases.Select(RunCaseAsync));
@@ -60,7 +61,9 @@ public sealed class LiveLunaMultiErrorRegressionTests(ITestOutputHelper output)
                     && !testCase.IncorrectWords.Any(word => ContainsWord(result.CorrectedText, word));
                 var profile = result.LunaExecution is { } execution
                     && execution.PromptProfile == LunaProductionConfiguration.Qualified.PromptVariant
-                    && execution.Effort == LunaProductionConfiguration.Qualified.Effort
+                    && execution.Model == selection.Model
+                    && execution.Effort == "low"
+                    && execution.ServiceTier == "priority"
                     && execution.Protocol == LunaProductionConfiguration.Qualified.ProtocolName;
                 var changed = result.ChangeCount > 0;
                 return (testCase.Id, timer.ElapsedMilliseconds, structure && protection && corrections && profile && changed,

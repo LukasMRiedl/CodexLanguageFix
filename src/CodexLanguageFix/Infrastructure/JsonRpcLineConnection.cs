@@ -12,6 +12,8 @@ internal sealed class JsonRpcLineConnection : IDisposable
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly TaskCompletionSource<Exception> _disconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposed;
     private long _nextId;
     private Task? _readerTask;
 
@@ -23,6 +25,13 @@ internal sealed class JsonRpcLineConnection : IDisposable
 
     public event Action<string, JsonElement>? NotificationReceived;
 
+    internal Task<Exception> Disconnected => _disconnected.Task;
+
+    internal void ThrowIfDisconnected()
+    {
+        if (Disconnected.IsCompletedSuccessfully) throw Disconnected.Result;
+    }
+
     public void Start()
     {
         _readerTask ??= Task.Run(ReadLoopAsync);
@@ -30,6 +39,7 @@ internal sealed class JsonRpcLineConnection : IDisposable
 
     public async Task<JsonElement> RequestAsync(string method, object? parameters, CancellationToken cancellationToken)
     {
+        ThrowIfDisconnected();
         var id = Interlocked.Increment(ref _nextId);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_pending.TryAdd(id, completion))
@@ -40,7 +50,9 @@ internal sealed class JsonRpcLineConnection : IDisposable
         try
         {
             await WriteAsync(new { method, id, @params = parameters }, cancellationToken).ConfigureAwait(false);
-            return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var finished = await Task.WhenAny(completion.Task, Disconnected).WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (finished == Disconnected) throw await Disconnected.ConfigureAwait(false);
+            return await completion.Task.ConfigureAwait(false);
         }
         finally
         {
@@ -53,16 +65,20 @@ internal sealed class JsonRpcLineConnection : IDisposable
 
     private async Task WriteAsync(object message, CancellationToken cancellationToken)
     {
+        ThrowIfDisconnected();
         var line = JsonSerializer.Serialize(message, JsonOptions);
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ThrowIfDisconnected();
             await _writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
             await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
-            throw new AppServerDisconnectedException("Die Verbindung zum Codex App Server wurde beendet.", exception);
+            var failure = new AppServerDisconnectedException("Die Verbindung zum Codex App Server wurde beendet.", exception);
+            _disconnected.TrySetResult(failure);
+            throw failure;
         }
         finally
         {
@@ -136,6 +152,7 @@ internal sealed class JsonRpcLineConnection : IDisposable
         finally
         {
             failure ??= new AppServerDisconnectedException("Die Verbindung zum Codex App Server wurde beendet.");
+            _disconnected.TrySetResult(failure);
             foreach (var pending in _pending.Values)
             {
                 pending.TrySetException(failure);
@@ -145,9 +162,11 @@ internal sealed class JsonRpcLineConnection : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _disconnected.TrySetResult(new AppServerDisconnectedException("Die Verbindung zum Codex App Server wurde beendet."));
         _lifetime.Cancel();
-        _lifetime.Dispose();
-        _writeGate.Dispose();
+        // Laufende Requests und der Reader dürfen ihre Synchronisationsobjekte noch
+        // verlassen. Deren Ressourcen werden danach mit der Verbindung freigegeben.
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

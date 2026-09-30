@@ -11,7 +11,6 @@ namespace CodexLanguageFix.Infrastructure;
 
 public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCodexCorrectionClient, ILunaTimedTransportClient
 {
-    internal const string LunaModel = "gpt-5.6-luna";
     internal static string LunaEffort => LunaProductionConfiguration.Qualified.Effort;
     internal static string LunaServiceTier => LunaProductionConfiguration.Qualified.ServiceTier;
 
@@ -21,8 +20,17 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
     private readonly ConcurrentDictionary<string, LoginCompletion> _completedLogins = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<LoginCompletion>> _loginWaiters = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TurnState> _turns = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, Lazy<Task<bool>>> _effortSupportChecks = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, Lazy<Task>> _verifiedEfforts = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _selectionGate = new(1, 1);
+    private readonly object _selectionStateGate = new();
+    private readonly SemaphoreSlim _runtimeGate = new(1, 1);
+    private readonly object _activityGate = new();
+    private int _activeOperations;
+    private TaskCompletionSource _operationsDrained = CompletedSignal();
+    private JsonRpcLineConnection? _selectionConnection;
+    private LunaModelSelection? _selection;
+    private bool _selectionResolved;
+    private int _selectionGeneration;
+    private string? _processExecutable;
     private readonly SemaphoreSlim _preparedThreadGate = new(1, 1);
     private readonly Channel<ThreadCleanup> _cleanupQueue = Channel.CreateUnbounded<ThreadCleanup>(
         new UnboundedChannelOptions
@@ -121,54 +129,86 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginFailed));
         }
 
-        ClearCapabilityCaches();
+        ClearSelection();
     }
 
-    public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) =>
-        SupportsLunaEffortAsync(LunaEffort, cancellationToken);
+    public async Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken)
+    {
+        using var operation = await EnterRuntimeOperationAsync(cancellationToken).ConfigureAwait(false);
+        var connection = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        return await ResolveOnConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<LunaModelSelection> ResolveOnConnectionAsync(
+        JsonRpcLineConnection connection, CancellationToken cancellationToken)
+    {
+        await _selectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                int generation;
+                lock (_selectionStateGate)
+                {
+                    connection.ThrowIfDisconnected();
+                    if (_selectionResolved && ReferenceEquals(_selectionConnection, connection))
+                        return _selection ?? throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
+                    generation = _selectionGeneration;
+                }
+                var account = await connection.RequestAsync("account/read", new { refreshToken = true }, cancellationToken).ConfigureAwait(false);
+                if (!account.TryGetProperty("account", out var identity)
+                    || identity.ValueKind != JsonValueKind.Object
+                    || !identity.TryGetProperty("type", out var kind)
+                    || kind.GetString() != "chatgpt")
+                {
+                    if (attempt == 0 && generation != Volatile.Read(ref _selectionGeneration)) continue;
+                    throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginRequired));
+                }
+
+                var pages = new List<JsonElement>();
+                var cursors = new HashSet<string>(StringComparer.Ordinal);
+                string? cursor = null;
+                do
+                {
+                    var page = await connection.RequestAsync("model/list", new { cursor, limit = 100, includeHidden = true }, cancellationToken).ConfigureAwait(false);
+                    pages.Add(page);
+                    if (page.TryGetProperty("nextCursor", out var next) && next.ValueKind != JsonValueKind.Null)
+                    {
+                        if (next.ValueKind != JsonValueKind.String) throw new JsonException("Invalid model-list cursor.");
+                        cursor = next.GetString();
+                    }
+                    else cursor = null;
+                    if (!string.IsNullOrEmpty(cursor) && !cursors.Add(cursor))
+                        throw new JsonException("Repeated model-list cursor.");
+                } while (!string.IsNullOrEmpty(cursor));
+
+                var selection = LunaModelSelector.Select(pages);
+                lock (_selectionStateGate)
+                {
+                    // Der erste Account-Read kann selbst ein account/updated auslösen.
+                    // Einmal vollständig neu lesen; niemals einen gemischten Snapshot veröffentlichen.
+                    if (attempt == 0 && generation != _selectionGeneration) continue;
+                    ValidateGeneration(connection, generation);
+                    _selection = selection;
+                    _selectionConnection = connection;
+                    _selectionResolved = true;
+                    return _selection ?? throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
+                }
+            }
+            throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginRequired));
+        }
+        finally { _selectionGate.Release(); }
+    }
 
     internal async Task<bool> SupportsLunaEffortAsync(string effort, CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
         ValidateEffort(effort);
-        var check = _effortSupportChecks.GetOrAdd(
-            effort,
-            key => new Lazy<Task<bool>>(
-                () => QueryLunaEffortSupportAsync(key, cancellationToken),
-                LazyThreadSafetyMode.ExecutionAndPublication));
         try
         {
-            return await check.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var selection = await ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+            return selection.Effort == effort;
         }
-        catch (Exception) when (check.Value.IsCanceled || check.Value.IsFaulted)
-        {
-            _effortSupportChecks.TryRemove(new KeyValuePair<string, Lazy<Task<bool>>>(effort, check));
-            throw;
-        }
-    }
-
-    private async Task<bool> QueryLunaEffortSupportAsync(string effort, CancellationToken cancellationToken)
-    {
-        string? cursor = null;
-        do
-        {
-            var result = await RequestAsync(
-                "model/list",
-                new { cursor, limit = 100, includeHidden = true },
-                cancellationToken).ConfigureAwait(false);
-            if (ModelListContainsLunaEffortAndFastTier(result, effort))
-            {
-                return true;
-            }
-
-            cursor = result.TryGetProperty("nextCursor", out var cursorElement)
-                && cursorElement.ValueKind == JsonValueKind.String
-                    ? cursorElement.GetString()
-                    : null;
-        }
-        while (!string.IsNullOrWhiteSpace(cursor));
-
-        return false;
+        catch (CodexAppServerException) { return false; }
     }
 
     /// <summary>
@@ -186,15 +226,28 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(developerInstructions);
         ValidateEffort(effort);
-        await EnsureEffortVerifiedAsync(effort, cancellationToken).ConfigureAwait(false);
+        using var operation = await EnterRuntimeOperationAsync(cancellationToken).ConfigureAwait(false);
+        var connection = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        await WarmUpOnConnectionAsync(connection, developerInstructions, effort, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task WarmUpOnConnectionAsync(JsonRpcLineConnection connection, string developerInstructions,
+        string effort, CancellationToken cancellationToken)
+    {
+        var selection = await ResolveOnConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
+        var generation = GetSelectionGeneration(connection, selection);
+        if (effort != selection.Effort)
+            throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
         Directory.CreateDirectory(_runtimeDirectory);
 
-        var profile = CreateProfile(developerInstructions, effort);
+        var profile = CreateProfile(developerInstructions, selection);
         PreparedLunaThread? stale = null;
         await _preparedThreadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_preparedThread is { } existing && existing.Profile == profile)
+            ValidateGeneration(connection, generation);
+            if (_preparedThread is { } existing && existing.Profile == profile
+                && existing.Connection == connection && existing.Generation == generation)
             {
                 return;
             }
@@ -212,22 +265,22 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
         if (stale is not null)
         {
-            EnqueueThreadCleanup(stale.ThreadId);
+            EnqueueThreadCleanup(stale.Connection, stale.ThreadId);
         }
 
-        var threadId = await StartThreadAsync(profile, cancellationToken).ConfigureAwait(false);
-        var prepared = new PreparedLunaThread(profile, threadId);
+        var threadId = await StartThreadAsync(connection, generation, profile, cancellationToken).ConfigureAwait(false);
+        var prepared = new PreparedLunaThread(profile, threadId, connection, generation);
         PreparedLunaThread? duplicate = null;
         await _preparedThreadGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            if (Volatile.Read(ref _disposeRequested) != 0 || _preparedThread is not null)
+            lock (_selectionStateGate)
             {
-                duplicate = prepared;
-            }
-            else
-            {
-                _preparedThread = prepared;
+                if (Volatile.Read(ref _disposeRequested) != 0 || _preparedThread is not null
+                    || generation != _selectionGeneration || connection.Disconnected.IsCompleted)
+                    duplicate = prepared;
+                else
+                    _preparedThread = prepared;
             }
         }
         finally
@@ -237,182 +290,107 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
         if (duplicate is not null)
         {
-            EnqueueThreadCleanup(duplicate.ThreadId);
+            EnqueueThreadCleanup(duplicate.Connection, duplicate.ThreadId);
         }
+        ValidateGeneration(connection, generation);
     }
 
-    public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken) =>
-        RunCorrectionAsync(
-            protectedText,
-            LunaCorrectionProvider.DeveloperPrompt,
-            LunaEffort,
-            cancellationToken,
-            replenishPreparedThread: true);
+    public Task<string> RunCorrectionAsync(string protectedText, LunaModelSelection selection, CancellationToken cancellationToken) =>
+        RunCorrectionAsync(protectedText, LunaCorrectionProvider.DeveloperPrompt, selection, cancellationToken, true);
 
-    internal async Task<string> RunCorrectionAsync(
-        string protectedText,
-        string developerInstructions,
-        CancellationToken cancellationToken)
+    internal async Task<string> RunCorrectionAsync(string protectedText, string developerInstructions, CancellationToken cancellationToken)
     {
-        return await RunCorrectionAsync(
-            protectedText,
-            developerInstructions,
-            LunaEffort,
-            cancellationToken,
-            replenishPreparedThread: false).ConfigureAwait(false);
+        var selection = await ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+        return await RunCorrectionAsync(protectedText, developerInstructions, selection, cancellationToken, false).ConfigureAwait(false);
     }
 
-    internal async Task<string> RunCorrectionAsync(
-        string protectedText,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken) =>
-        await RunCorrectionAsync(
-            protectedText,
-            developerInstructions,
-            effort,
-            cancellationToken,
-            replenishPreparedThread: false).ConfigureAwait(false);
+    internal async Task<string> RunCorrectionAsync(string protectedText, string developerInstructions, string effort, CancellationToken cancellationToken)
+    {
+        var selection = await ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+        if (effort != selection.Effort) throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
+        return await RunCorrectionAsync(protectedText, developerInstructions, selection, cancellationToken, false).ConfigureAwait(false);
+    }
 
-    private async Task<string> RunCorrectionAsync(
-        string protectedText,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken,
-        bool replenishPreparedThread)
+    private async Task<string> RunCorrectionAsync(string protectedText, string developerInstructions,
+        LunaModelSelection selection, CancellationToken cancellationToken, bool replenishPreparedThread)
     {
         ArgumentNullException.ThrowIfNull(protectedText);
-        var inputJson = JsonSerializer.Serialize(new { source_text = protectedText });
-        var execution = await RunStructuredCorrectionCoreAsync(
-            inputJson,
-            LunaCorrectionProvider.OutputSchema,
-            developerInstructions,
-            effort,
-            cancellationToken,
-            replenishPreparedThread).ConfigureAwait(false);
+        var inputJson = JsonSerializer.Serialize(
+            new { source_text = protectedText },
+            LunaCorrectionProvider.ModelInputSerializerOptions);
+        var execution = await RunStructuredCorrectionCoreAsync(inputJson, LunaCorrectionProvider.OutputSchema,
+            developerInstructions, selection, cancellationToken, replenishPreparedThread).ConfigureAwait(false);
         return execution.Response;
     }
 
-    public async Task<string> RunStructuredCorrectionAsync(
-        string inputJson,
-        JsonElement outputSchema,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken)
+    public async Task<string> RunStructuredCorrectionAsync(string inputJson, JsonElement outputSchema,
+        string developerInstructions, LunaModelSelection selection, CancellationToken cancellationToken)
     {
-        var execution = await RunStructuredCorrectionCoreAsync(
-            inputJson,
-            outputSchema,
-            developerInstructions,
-            effort,
-            cancellationToken,
-            replenishPreparedThread: true).ConfigureAwait(false);
+        var execution = await RunStructuredCorrectionCoreAsync(inputJson, outputSchema,
+            developerInstructions, selection, cancellationToken, true).ConfigureAwait(false);
         return execution.Response;
     }
 
-    internal Task<LunaTransportExecution> RunStructuredCorrectionWithTimingAsync(
-        string inputJson,
-        JsonElement outputSchema,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken,
+    internal Task<LunaTransportExecution> RunStructuredCorrectionWithTimingAsync(string inputJson, JsonElement outputSchema,
+        string developerInstructions, LunaModelSelection selection, CancellationToken cancellationToken,
         bool replenishPreparedThread = false) =>
-        RunStructuredCorrectionCoreAsync(
-            inputJson,
-            outputSchema,
-            developerInstructions,
-            effort,
-            cancellationToken,
-            replenishPreparedThread);
+        RunStructuredCorrectionCoreAsync(inputJson, outputSchema, developerInstructions, selection,
+            cancellationToken, replenishPreparedThread);
+
+    internal async Task<LunaTransportExecution> RunStructuredCorrectionWithTimingAsync(string inputJson, JsonElement outputSchema,
+        string developerInstructions, string effort, CancellationToken cancellationToken,
+        bool replenishPreparedThread = false)
+    {
+        var selection = await ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+        if (effort != selection.Effort) throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
+        return await RunStructuredCorrectionCoreAsync(inputJson, outputSchema, developerInstructions, selection,
+            cancellationToken, replenishPreparedThread).ConfigureAwait(false);
+    }
 
     Task<LunaTransportExecution> ILunaTimedTransportClient.RunStructuredCorrectionWithTimingAsync(
-        string inputJson,
-        JsonElement outputSchema,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken,
-        bool replenishPreparedThread) =>
-        RunStructuredCorrectionWithTimingAsync(
-            inputJson,
-            outputSchema,
-            developerInstructions,
-            effort,
-            cancellationToken,
-            replenishPreparedThread);
+        string inputJson, JsonElement outputSchema, string developerInstructions, LunaModelSelection selection,
+        CancellationToken cancellationToken, bool replenishPreparedThread) =>
+        RunStructuredCorrectionCoreAsync(inputJson, outputSchema, developerInstructions, selection,
+            cancellationToken, replenishPreparedThread);
 
-    private async Task<LunaTransportExecution> RunStructuredCorrectionCoreAsync(
-        string inputJson,
-        JsonElement outputSchema,
-        string developerInstructions,
-        string effort,
-        CancellationToken cancellationToken,
+    private async Task<LunaTransportExecution> RunStructuredCorrectionCoreAsync(string inputJson, JsonElement outputSchema,
+        string developerInstructions, LunaModelSelection selection, CancellationToken cancellationToken,
         bool replenishPreparedThread)
     {
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(inputJson);
         ArgumentException.ThrowIfNullOrWhiteSpace(developerInstructions);
+        ArgumentNullException.ThrowIfNull(selection);
         if (outputSchema.ValueKind != JsonValueKind.Object)
-        {
             throw new ArgumentException("Das Ausgabeschema muss ein JSON-Objekt sein.", nameof(outputSchema));
-        }
-        ValidateEffort(effort);
+        using var operation = await EnterRuntimeOperationAsync(cancellationToken).ConfigureAwait(false);
         var ensureServer = Stopwatch.StartNew();
-        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        var ensureServerElapsed = ensureServer.Elapsed;
-
-        var capabilityValidation = Stopwatch.StartNew();
-        await EnsureEffortVerifiedAsync(effort, cancellationToken).ConfigureAwait(false);
-        var capabilityElapsed = capabilityValidation.Elapsed;
-
-        Directory.CreateDirectory(_runtimeDirectory);
-        return await RunCorrectionCoreAsync(
-            inputJson,
-            outputSchema,
-            developerInstructions,
-            effort,
-            ensureServerElapsed,
-            capabilityElapsed,
-            replenishPreparedThread,
-            cancellationToken).ConfigureAwait(false);
+        var connection = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var ensureElapsed = ensureServer.Elapsed;
+        return await RunOnConnectionAsync(connection, inputJson, outputSchema, developerInstructions, selection,
+            cancellationToken, replenishPreparedThread, ensureElapsed).ConfigureAwait(false);
     }
 
-    private async Task EnsureEffortVerifiedAsync(string effort, CancellationToken cancellationToken)
+    internal async Task<LunaTransportExecution> RunOnConnectionAsync(JsonRpcLineConnection connection,
+        string inputJson, JsonElement outputSchema, string developerInstructions, LunaModelSelection selection,
+        CancellationToken cancellationToken, bool replenishPreparedThread = false, TimeSpan ensureElapsed = default)
     {
-        var verification = _verifiedEfforts.GetOrAdd(
-            effort,
-            key => new Lazy<Task>(
-                () => VerifyEffortAsync(key, cancellationToken),
-                LazyThreadSafetyMode.ExecutionAndPublication));
-        try
-        {
-            await verification.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (verification.Value.IsCanceled || verification.Value.IsFaulted)
-        {
-            _verifiedEfforts.TryRemove(new KeyValuePair<string, Lazy<Task>>(effort, verification));
-            throw;
-        }
-    }
-
-    private async Task VerifyEffortAsync(string effort, CancellationToken cancellationToken)
-    {
-        var account = await GetAccountAsync(cancellationToken).ConfigureAwait(false);
-        if (!account.IsChatGpt)
-        {
-            throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginRequired));
-        }
-
-        if (!await SupportsLunaEffortAsync(effort, cancellationToken).ConfigureAwait(false))
-        {
+        var validation = Stopwatch.StartNew();
+        var current = await ResolveOnConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
+        if (selection != current)
             throw new CodexAppServerException(_localizer.Get(AppText.LunaUnavailable));
-        }
+        var generation = GetSelectionGeneration(connection, selection);
+        return await RunCorrectionCoreAsync(connection, generation, inputJson, outputSchema, developerInstructions, selection,
+            ensureElapsed, validation.Elapsed, replenishPreparedThread, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<LunaTransportExecution> RunCorrectionCoreAsync(
+        JsonRpcLineConnection connection,
+        int generation,
         string inputJson,
         JsonElement outputSchema,
         string developerInstructions,
-        string effort,
+        LunaModelSelection selection,
         TimeSpan ensureServer,
         TimeSpan capabilityValidation,
         bool replenishPreparedThread,
@@ -426,9 +404,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             TimeSpan.Zero,
             TimeSpan.Zero,
             TimeSpan.Zero);
-        var profile = CreateProfile(developerInstructions, effort);
+        var profile = CreateProfile(developerInstructions, selection);
         var threadStart = Stopwatch.StartNew();
-        var threadId = await TakePreparedOrStartThreadAsync(profile, cancellationToken).ConfigureAwait(false);
+        var threadId = await TakePreparedOrStartThreadAsync(connection, generation, profile, cancellationToken).ConfigureAwait(false);
         timing = timing with { ThreadStart = threadStart.Elapsed };
         string? turnId = null;
         LunaTransportExecution? execution = null;
@@ -437,14 +415,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         {
             var turnStartTimestamp = Stopwatch.GetTimestamp();
             var turnStart = Stopwatch.StartNew();
-            var turnResult = await RequestAsync(
+            ValidateGeneration(connection, generation);
+            var turnResult = await connection.RequestAsync(
                 "turn/start",
                 new
                 {
                     threadId,
                     input = new[] { new { type = "text", text = inputJson } },
                     model = profile.Model,
-                    effort,
+                    effort = profile.Effort,
                     serviceTier = profile.ServiceTier,
                     summary = "none",
                     approvalPolicy = "never",
@@ -456,9 +435,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             turnId = RequiredString(turnResult.GetProperty("turn"), "id");
             RegisterTurnStart(turnId, turnStartTimestamp);
             var state = _turns[turnId];
-            using var registration = cancellationToken.Register(() => state.Completion.TrySetCanceled(cancellationToken));
             var completionWait = Stopwatch.StartNew();
+            var finished = await Task.WhenAny(state.Completion.Task, connection.Disconnected)
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (finished == connection.Disconnected) throw await connection.Disconnected.ConfigureAwait(false);
             var completed = await state.Completion.Task.ConfigureAwait(false);
+            ValidateGeneration(connection, generation);
             timing = timing with
             {
                 CompletionWait = completionWait.Elapsed,
@@ -492,7 +474,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         {
             try
             {
-                await RequestAsync("turn/interrupt", new { threadId, turnId }, CancellationToken.None).ConfigureAwait(false);
+                using var interruptTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await connection.RequestAsync("turn/interrupt", new { threadId, turnId }, interruptTimeout.Token).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -509,7 +492,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             }
 
             var cleanupStart = totalStopwatch.Elapsed;
-            EnqueueThreadCleanup(threadId);
+            EnqueueThreadCleanup(connection, threadId);
             if (replenishPreparedThread && Volatile.Read(ref _disposeRequested) == 0)
             {
                 _ = ReplenishPreparedThreadAsync(profile);
@@ -518,6 +501,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             Volatile.Write(ref _lastProtocolTiming, timing);
         }
 
+        ValidateGeneration(connection, generation);
         return execution! with { Timing = timing };
     }
 
@@ -540,11 +524,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         }
     }
 
-    private LunaCorrectionProfile CreateProfile(string developerInstructions, string effort) =>
+    private LunaCorrectionProfile CreateProfile(string developerInstructions, LunaModelSelection selection) =>
         new(
-            LunaModel,
-            effort,
-            LunaServiceTier,
+            selection.Model,
+            selection.Effort,
+            selection.ServiceTier,
             string.Equals(developerInstructions, LunaPromptCatalog.PatchProtocol, StringComparison.Ordinal)
                 ? "patch-v1"
                 : "full-v1",
@@ -552,6 +536,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             developerInstructions);
 
     private async Task<string> TakePreparedOrStartThreadAsync(
+        JsonRpcLineConnection connection,
+        int generation,
         LunaCorrectionProfile profile,
         CancellationToken cancellationToken)
     {
@@ -559,7 +545,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         await _preparedThreadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_preparedThread is { } candidate && candidate.Profile == profile)
+            ValidateGeneration(connection, generation);
+            if (_preparedThread is { } candidate && candidate.Profile == profile
+                && candidate.Connection == connection && candidate.Generation == generation)
             {
                 prepared = candidate;
                 _preparedThread = null;
@@ -567,7 +555,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             else if (_preparedThread is { } stale)
             {
                 _preparedThread = null;
-                EnqueueThreadCleanup(stale.ThreadId);
+                EnqueueThreadCleanup(stale.Connection, stale.ThreadId);
             }
         }
         finally
@@ -580,14 +568,17 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             return prepared.ThreadId;
         }
 
-        return await StartThreadAsync(profile, cancellationToken).ConfigureAwait(false);
+        return await StartThreadAsync(connection, generation, profile, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> StartThreadAsync(
+        JsonRpcLineConnection connection,
+        int generation,
         LunaCorrectionProfile profile,
         CancellationToken cancellationToken)
     {
-        var threadResult = await RequestAsync(
+        ValidateGeneration(connection, generation);
+        var threadResult = await connection.RequestAsync(
             "thread/start",
             new
             {
@@ -601,6 +592,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
                 config = new
                 {
                     model_verbosity = "low",
+                    model_reasoning_effort = profile.Effort,
                     service_tier = profile.ServiceTier,
                     web_search = "disabled",
                     mcp_servers = _disabledMcpServers,
@@ -628,7 +620,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         return RequiredString(threadResult.GetProperty("thread"), "id");
     }
 
-    private void EnqueueThreadCleanup(string threadId)
+    private void EnqueueThreadCleanup(JsonRpcLineConnection connection, string threadId)
     {
         if (string.IsNullOrWhiteSpace(threadId)
             || Volatile.Read(ref _disposeRequested) != 0)
@@ -636,7 +628,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             return;
         }
 
-        _cleanupQueue.Writer.TryWrite(new ThreadCleanup(threadId));
+        _cleanupQueue.Writer.TryWrite(new ThreadCleanup(connection, threadId));
     }
 
     private async Task ProcessCleanupQueueAsync()
@@ -663,8 +655,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
     private async Task UnsubscribeThreadAsync(ThreadCleanup cleanup)
     {
-        var connection = _connection;
-        if (connection is null || _process is not { HasExited: false })
+        var connection = cleanup.Connection;
+        if (connection.Disconnected.IsCompleted)
         {
             return;
         }
@@ -680,7 +672,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         }
         catch (Exception) when (timeout.IsCancellationRequested
                                || _cleanupLifetime.IsCancellationRequested
-                               || connection != _connection)
+                               || connection.Disconnected.IsCompleted)
         {
             // Ein Cleanup darf weder den Korrekturlauf noch das Beenden blockieren.
         }
@@ -712,7 +704,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
     private async Task<JsonRpcLineConnection> EnsureStartedAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
-        if (_connectionReady && _connection is not null && _process is { HasExited: false })
+        if (_connectionReady && _connection is { Disconnected.IsCompleted: false } && _process is { HasExited: false })
         {
             return _connection;
         }
@@ -721,12 +713,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         try
         {
             ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
-            if (_connectionReady && _connection is not null && _process is { HasExited: false })
+            if (_connectionReady && _connection is { Disconnected.IsCompleted: false } && _process is { HasExited: false })
             {
                 return _connection;
             }
 
-            _connectionReady = false;
+            CleanupFailedStart();
             var executable = CodexExecutableLocator.Find()
                 ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexNotInstalled));
             var startInfo = new ProcessStartInfo(executable)
@@ -744,19 +736,17 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             Directory.CreateDirectory(_runtimeDirectory);
             startInfo.ArgumentList.Add("-c");
             startInfo.ArgumentList.Add("features.plugins=false");
-            var privateCatalog = LunaModelCatalogOverride.TryCreate(_runtimeDirectory);
-            if (privateCatalog is not null)
-            {
-                startInfo.ArgumentList.Add("-c");
-                startInfo.ArgumentList.Add($"model_catalog_json={JsonSerializer.Serialize(privateCatalog)}");
-            }
             startInfo.ArgumentList.Add("app-server");
             var process = Process.Start(startInfo)
                 ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexAppServerStartFailed));
             _process = process;
+            _processExecutable = executable;
             ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
             var connection = new JsonRpcLineConnection(process.StandardOutput, process.StandardInput);
-            connection.NotificationReceived += HandleNotification;
+            connection.NotificationReceived += (method, parameters) =>
+            {
+                if (ReferenceEquals(_connection, connection)) HandleNotification(method, parameters);
+            };
             connection.Start();
             _ = DrainStandardErrorAsync(process.StandardError);
             _connection = connection;
@@ -849,7 +839,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         _connectionReady = false;
         _connection?.Dispose();
         _connection = null;
-        ClearCapabilityCaches();
+        ClearSelection();
         _preparedThread = null;
         if (_process is { HasExited: false } process)
         {
@@ -866,10 +856,16 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
         _process?.Dispose();
         _process = null;
+        _processExecutable = null;
     }
 
-    private void HandleNotification(string method, JsonElement parameters)
+    internal void HandleNotification(string method, JsonElement parameters)
     {
+        if (string.Equals(method, "account/updated", StringComparison.Ordinal))
+        {
+            ClearSelection();
+            return;
+        }
         if (string.Equals(method, "account/login/completed", StringComparison.Ordinal))
         {
             if (parameters.TryGetProperty("loginId", out var loginIdElement)
@@ -939,42 +935,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         }
     }
 
-    internal static bool ModelListContainsLuna(JsonElement result)
-        => ModelListContainsLunaEffortAndFastTier(result, LunaEffort);
+    internal static bool ModelListContainsLuna(JsonElement result) =>
+        LunaModelSelector.Select([result]) is not null;
 
-    internal static bool ModelListContainsLunaEffortAndFastTier(JsonElement result, string requestedEffort)
-    {
-        if (!result.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
-        foreach (var model in data.EnumerateArray())
-        {
-            var slug = model.TryGetProperty("model", out var modelElement) ? modelElement.GetString() : null;
-            if (!string.Equals(slug, LunaModel, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var supportsEffort = model.TryGetProperty("supportedReasoningEfforts", out var efforts)
-                && efforts.ValueKind == JsonValueKind.Array
-                && efforts.EnumerateArray().Any(option =>
-                    option.TryGetProperty("reasoningEffort", out var effort)
-                    && string.Equals(effort.GetString(), requestedEffort, StringComparison.Ordinal));
-            var supportsFastTier = model.TryGetProperty("serviceTiers", out var tiers)
-                && tiers.ValueKind == JsonValueKind.Array
-                && tiers.EnumerateArray().Any(option =>
-                    option.TryGetProperty("id", out var id)
-                    && string.Equals(id.GetString(), LunaServiceTier, StringComparison.Ordinal));
-            if (supportsEffort && supportsFastTier)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    internal static bool ModelListContainsLunaEffortAndFastTier(JsonElement result, string requestedEffort) =>
+        requestedEffort == "low" && ModelListContainsLuna(result);
 
     internal void RegisterTurnStart(string turnId, long timestamp)
     {
@@ -1002,10 +967,85 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(_disposed || Volatile.Read(ref _disposeRequested) != 0, this);
 
-    private void ClearCapabilityCaches()
+    private void ClearSelection()
     {
-        _effortSupportChecks.Clear();
-        _verifiedEfforts.Clear();
+        lock (_selectionStateGate)
+        {
+            _selectionGeneration++;
+            _selection = null;
+            _selectionConnection = null;
+            _selectionResolved = false;
+        }
+    }
+
+    private int GetSelectionGeneration(JsonRpcLineConnection connection, LunaModelSelection selection)
+    {
+        lock (_selectionStateGate)
+        {
+            connection.ThrowIfDisconnected();
+            if (!_selectionResolved || _selectionConnection != connection || _selection != selection)
+                throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginRequired));
+            return _selectionGeneration;
+        }
+    }
+
+    private void ValidateGeneration(JsonRpcLineConnection connection, int generation)
+    {
+        connection.ThrowIfDisconnected();
+        if (generation != Volatile.Read(ref _selectionGeneration))
+            throw new CodexAppServerException(_localizer.Get(AppText.OpenAiLoginRequired));
+    }
+
+    private Task<IDisposable> EnterRuntimeOperationAsync(CancellationToken cancellationToken) =>
+        EnterRuntimeOperationAsync(null, cancellationToken);
+
+    internal async Task<IDisposable> EnterRuntimeOperationAsync(string? executable, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await _runtimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            executable ??= CodexExecutableLocator.Find()
+                ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexNotInstalled));
+            if (_connection is { } connection && _processExecutable is { } previous
+                && !string.Equals(previous, executable, StringComparison.OrdinalIgnoreCase))
+            {
+                Task drained;
+                lock (_activityGate) drained = _operationsDrained.Task;
+                await drained.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await ResetAsync(connection).ConfigureAwait(false);
+            }
+            lock (_activityGate)
+            {
+                if (_activeOperations++ == 0) _operationsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+            return new RuntimeOperation(this);
+        }
+        finally { _runtimeGate.Release(); }
+    }
+
+    private void ExitRuntimeOperation()
+    {
+        lock (_activityGate)
+        {
+            if (--_activeOperations == 0) _operationsDrained.TrySetResult();
+        }
+    }
+
+    private static TaskCompletionSource CompletedSignal()
+    {
+        var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.SetResult();
+        return signal;
+    }
+
+    private sealed class RuntimeOperation(CodexAppServerClient owner) : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) owner.ExitRuntimeOperation();
+        }
     }
 
     private static string RequiredString(JsonElement element, string property)
@@ -1035,7 +1075,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             _connection?.Dispose();
             _connection = null;
             _connectionReady = false;
-            ClearCapabilityCaches();
+            ClearSelection();
             await _preparedThreadGate.WaitAsync().ConfigureAwait(false);
             try
             {
@@ -1054,6 +1094,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
             _process?.Dispose();
             _process = null;
+            _processExecutable = null;
         }
         finally
         {
@@ -1107,7 +1148,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
         }
 
         _process?.Dispose();
-        ClearCapabilityCaches();
+        ClearSelection();
         if (_cleanupWorker.IsCompleted)
         {
             _cleanupLifetime.Dispose();
@@ -1116,7 +1157,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
 
     private sealed record LoginCompletion(bool Success);
 
-    private sealed record ThreadCleanup(string ThreadId);
+    private sealed record ThreadCleanup(JsonRpcLineConnection Connection, string ThreadId);
 
     private sealed record TurnCompletion(string Status, string? Error);
 

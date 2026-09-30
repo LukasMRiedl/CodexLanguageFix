@@ -21,7 +21,9 @@ public sealed class LiveLunaCorrectionTests
         using var client = new CodexAppServerClient(directory, localizer);
         var account = await client.GetAccountAsync(CancellationToken.None);
         Assert.True(account.IsChatGpt, "Für den Live-Test muss Codex mit ChatGPT-OAuth angemeldet sein.");
-        Assert.True(await client.SupportsLunaAsync(CancellationToken.None), "Luna ohne Denkmodus und mit Fast Mode muss verfügbar sein.");
+        var selection = await client.ResolveLunaProfileAsync(CancellationToken.None);
+        Assert.Equal("low", selection.Effort);
+        Assert.Equal("priority", selection.ServiceTier);
 
         var provider = new LunaCorrectionProvider(client, localizer);
         var result = await provider.CorrectAsync(
@@ -33,8 +35,9 @@ public sealed class LiveLunaCorrectionTests
         Assert.Contains("korrekt", result.CorrectedText, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.ChangeCount >= 1);
         Assert.NotNull(result.LunaExecution);
+        Assert.Equal(selection.Model, result.LunaExecution.Model);
         Assert.Equal("baseline", result.LunaExecution.PromptProfile);
-        Assert.Equal("none", result.LunaExecution.Effort);
+        Assert.Equal("low", result.LunaExecution.Effort);
         Assert.Equal("full-v1", result.LunaExecution.Protocol);
     }
 }

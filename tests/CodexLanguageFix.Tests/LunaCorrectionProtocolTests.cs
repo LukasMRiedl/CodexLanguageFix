@@ -108,9 +108,13 @@ public sealed class LunaCorrectionProtocolTests
 
         public Task ConnectChatGptAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+        public Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new LunaModelSelection("gpt-5.6-luna", "low", "priority"));
 
-        public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken)
+        public Task<string> RunCorrectionAsync(
+            string protectedText,
+            LunaModelSelection selection,
+            CancellationToken cancellationToken)
         {
             FullRunCount++;
             return Task.FromResult(FullResponse(protectedText));
@@ -120,7 +124,7 @@ public sealed class LunaCorrectionProtocolTests
             string inputJson,
             JsonElement outputSchema,
             string developerInstructions,
-            string effort,
+            LunaModelSelection selection,
             CancellationToken cancellationToken)
         {
             StructuredRunCount++;

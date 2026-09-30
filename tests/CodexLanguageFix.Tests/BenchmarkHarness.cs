@@ -483,6 +483,10 @@ internal sealed record LiveBenchmarkObservation(
     double? ProviderDurationMs,
     string? ErrorType)
 {
+    public string? Model { get; init; }
+
+    public string? ServiceTier { get; init; }
+
     public string Protocol { get; init; } = LiveBenchmarkProtocols.Full;
 
     /// <summary>Teilzeiten des transport-unabhängigen Luna-Ausführungsergebnisses.</summary>
@@ -824,7 +828,7 @@ internal static class LiveBenchmarkStagePlan
         var baseline = report.Cells.SingleOrDefault(item =>
             item.Provider == "luna"
             && item.Variant == "baseline"
-            && item.Effort == "none"
+            && item.Effort == "low"
             && item.Protocol == LiveBenchmarkProtocols.Full);
         if (baseline is null || !IsSafe(report, baseline))
         {
@@ -931,16 +935,20 @@ internal sealed class LiveBenchmarkRuntime : IDisposable
     private LiveBenchmarkRuntime(
         CodexAppServerClient client,
         AppLocalizer localizer,
+        LunaModelSelection selection,
         IReadOnlyList<LiveBenchmarkCapability> capabilities)
     {
         Client = client;
         Localizer = localizer;
+        Selection = selection;
         Capabilities = capabilities;
     }
 
     public CodexAppServerClient Client { get; private set; }
 
     public AppLocalizer Localizer { get; }
+
+    public LunaModelSelection Selection { get; private set; }
 
     public IReadOnlyList<LiveBenchmarkCapability> Capabilities { get; }
 
@@ -957,7 +965,9 @@ internal sealed class LiveBenchmarkRuntime : IDisposable
                 throw new InvalidOperationException("Für den Live-Benchmark muss Codex mit ChatGPT-OAuth angemeldet sein.");
             }
 
+            var selection = await replacement.ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
             Client = replacement;
+            Selection = selection;
         }
         catch
         {
@@ -981,6 +991,7 @@ internal sealed class LiveBenchmarkRuntime : IDisposable
                 throw new InvalidOperationException("Für den Live-Benchmark muss Codex mit ChatGPT-OAuth angemeldet sein.");
             }
 
+            var selection = await client.ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
             var capabilities = new List<LiveBenchmarkCapability>();
             foreach (var effort in efforts.Select(LiveBenchmarkScheduler.NormalizeEffort).Distinct(StringComparer.Ordinal))
             {
@@ -1008,7 +1019,7 @@ internal sealed class LiveBenchmarkRuntime : IDisposable
                 capabilities.Add(new LiveBenchmarkCapability(effort, supported, reason));
             }
 
-            return new LiveBenchmarkRuntime(client, localizer, capabilities);
+            return new LiveBenchmarkRuntime(client, localizer, selection, capabilities);
         }
         catch
         {
@@ -1044,6 +1055,28 @@ internal static class LiveBenchmarkRunner
             WallDurationMs = totalWall.Elapsed.TotalMilliseconds,
             TargetLiveDurationMinutes = configuration.TargetLiveDurationMinutes
         });
+    }
+
+    public static LiveBenchmarkCell? SelectSafeLanguageToolComparisonCell(
+        IReadOnlyList<LiveBenchmarkCellReport> cells,
+        IEnumerable<LiveBenchmarkObservation> observations)
+    {
+        var cell = cells
+            .Where(cell => cell.Provider == "luna"
+                           && cell.Effort is not null
+                           && cell.Errors == 0
+                           && cell.ControlsExact == cell.ControlsTotal
+                           && observations.Where(item => item.Provider == "luna"
+                                                           && item.Variant == cell.Variant
+                                                           && item.Effort == cell.Effort
+                                                           && item.Protocol == cell.Protocol)
+                               .All(item => item.Succeeded && (!item.SafetyCritical || item.Exact)))
+            .OrderByDescending(cell => cell.F05)
+            .ThenBy(cell => cell.P95DurationMs)
+            .ThenBy(cell => cell.P50DurationMs)
+            .ThenBy(cell => LivePromptCatalog.Get(cell.Variant).Instructions.Length)
+            .FirstOrDefault();
+        return cell is null ? null : new LiveBenchmarkCell(cell.Variant, cell.Effort!, cell.Protocol);
     }
 
     private static async Task<LiveBenchmarkRunResult> RunSingleAsync(
@@ -1213,32 +1246,21 @@ internal static class LiveBenchmarkRunner
 
         if (configuration.CompareLanguageTool)
         {
-            var comparisonCell = BuildCellReports(observations, warmups, configuration)
-                .Where(cell => cell.Provider == "luna"
-                               && cell.Effort is not null
-                               && cell.Errors == 0
-                               && cell.ControlsExact == cell.ControlsTotal
-                               && observations.Where(item => item.Provider == "luna"
-                                                               && item.Variant == cell.Variant
-                                                               && item.Effort == cell.Effort
-                                                               && item.Protocol == cell.Protocol)
-                                   .All(item => item.Succeeded && (!item.SafetyCritical || item.Exact)))
-                .OrderByDescending(cell => cell.F05)
-                .ThenBy(cell => cell.P95DurationMs)
-                .ThenBy(cell => cell.P50DurationMs)
-                .ThenBy(cell => LivePromptCatalog.Get(cell.Variant).Instructions.Length)
-                .Select(cell => new LiveBenchmarkCell(cell.Variant, cell.Effort!, cell.Protocol))
-                .FirstOrDefault()
-                ?? throw new InvalidOperationException("Keine sichere Luna-Zelle ist für den LanguageTool-Vergleich verfügbar.");
-            await RunLanguageToolComparisonAsync(
-                providerComparisonCorpus ?? corpus,
-                configuration,
-                client,
-                localizer,
-                comparisonCell,
-                observations,
-                inFlight,
-                cancellationToken).ConfigureAwait(false);
+            var comparisonCell = SelectSafeLanguageToolComparisonCell(
+                BuildCellReports(observations, warmups, configuration),
+                observations.ToArray());
+            if (comparisonCell is not null)
+            {
+                await RunLanguageToolComparisonAsync(
+                    providerComparisonCorpus ?? corpus,
+                    configuration,
+                    client,
+                    localizer,
+                    comparisonCell,
+                    observations,
+                    inFlight,
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
 
         wall.Stop();
@@ -1253,8 +1275,8 @@ internal static class LiveBenchmarkRunner
             configuration.Tier,
             corpus.Count,
             LiveBenchmarkCorpusSelection.Hash(corpus),
-            "gpt-5.6-luna",
-            "priority",
+            runtime.Selection.Model,
+            runtime.Selection.ServiceTier,
             configuration.Repetitions,
             configuration.Parallelism,
             configuration.Warmup,
@@ -1368,7 +1390,7 @@ internal static class LiveBenchmarkRunner
                 selectedCells =
                 [
                     LiveBenchmarkStagePlan.SelectBestCell(previous),
-                    new LiveBenchmarkCell("baseline", "none", LiveBenchmarkProtocols.Full)
+                    new LiveBenchmarkCell("baseline", "low", LiveBenchmarkProtocols.Full)
                 ];
                 selectedCells = selectedCells.Distinct().ToArray();
                 stageConfiguration = stageConfiguration with { SelectedCells = selectedCells };
@@ -1561,11 +1583,17 @@ internal static class LiveBenchmarkRunner
                 LiveBenchmarkProtocols.Full or LiveBenchmarkProtocols.Span => "{\"source_text\":\"\"}",
                 _ => "{\"segments\":[]}"
             };
+            var selection = await client.ResolveLunaProfileAsync(timeout.Token).ConfigureAwait(false);
+            if (!string.Equals(selection.Effort, cell.Effort, StringComparison.Ordinal))
+            {
+                return SchemaWarmupFailure(cell, stopwatch, "UnsupportedEffort");
+            }
+
             var raw = await structured.RunStructuredCorrectionAsync(
                 input,
                 schema,
                 prompt.Instructions,
-                cell.Effort,
+                selection,
                 timeout.Token).ConfigureAwait(false);
             stopwatch.Stop();
             if (!IsSchemaShapedWarmup(raw, LiveBenchmarkProtocols.Normalize(cell.Protocol)))
@@ -1975,6 +2003,8 @@ internal static class LiveBenchmarkRunner
             var timing = execution.Timings;
             return observation with
             {
+                Model = execution.Model,
+                ServiceTier = execution.ServiceTier,
                 ServerAccountCheckMs = timing.ServerAndAccount.TotalMilliseconds,
                 ThreadProvisionMs = timing.ThreadProvision.TotalMilliseconds,
                 TurnStartMs = timing.TurnStart.TotalMilliseconds,
@@ -2094,37 +2124,56 @@ internal static class LiveBenchmarkRunner
         public Task ConnectChatGptAsync(CancellationToken cancellationToken) =>
             inner.ConnectChatGptAsync(cancellationToken);
 
-        public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) =>
-            inner.SupportsLunaAsync(cancellationToken);
+        public async Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken)
+        {
+            var selection = await inner.ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(effort, selection.Effort, StringComparison.Ordinal))
+            {
+                throw new CodexAppServerException(
+                    $"The selected Luna model does not support the requested benchmark effort '{effort}'.");
+            }
 
-        public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken) =>
-            inner.RunCorrectionAsync(protectedText, instructions, effort, cancellationToken);
+            return selection;
+        }
+
+        public Task<string> RunCorrectionAsync(
+            string protectedText,
+            LunaModelSelection selection,
+            CancellationToken cancellationToken) =>
+            inner.RunStructuredCorrectionAsync(
+                JsonSerializer.Serialize(
+                    new { source_text = protectedText },
+                    LunaCorrectionProvider.ModelInputSerializerOptions),
+                LunaCorrectionProvider.OutputSchema,
+                instructions,
+                selection,
+                cancellationToken);
 
         public Task<string> RunStructuredCorrectionAsync(
             string inputJson,
             JsonElement outputSchema,
             string developerInstructions,
-            string requestedEffort,
+            LunaModelSelection selection,
             CancellationToken cancellationToken) =>
             ((IStructuredCodexCorrectionClient)inner).RunStructuredCorrectionAsync(
                 inputJson,
                 outputSchema,
                 instructions,
-                effort,
+                selection,
                 cancellationToken);
 
         public Task<LunaTransportExecution> RunStructuredCorrectionWithTimingAsync(
             string inputJson,
             JsonElement outputSchema,
             string developerInstructions,
-            string requestedEffort,
+            LunaModelSelection selection,
             CancellationToken cancellationToken,
             bool replenishPreparedThread = false) =>
             ((ILunaTimedTransportClient)inner).RunStructuredCorrectionWithTimingAsync(
                 inputJson,
                 outputSchema,
                 instructions,
-                effort,
+                selection,
                 cancellationToken,
                 replenishPreparedThread);
 
@@ -2221,12 +2270,12 @@ internal static class LiveBenchmarkQuality
         var baseline = final.Cells.FirstOrDefault(cell =>
             cell.Provider == "luna"
             && cell.Variant == "baseline"
-            && cell.Effort == "none"
+            && cell.Effort == "low"
             && cell.Protocol == LiveBenchmarkProtocols.Full);
         var baselineObservations = final.Observations
             .Where(item => item.Provider == "luna"
                            && item.Variant == "baseline"
-                           && item.Effort == "none"
+                           && item.Effort == "low"
                            && item.Protocol == LiveBenchmarkProtocols.Full)
             .ToArray();
         return final.Cells

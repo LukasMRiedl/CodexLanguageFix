@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
@@ -100,9 +101,44 @@ public sealed class LunaCorrectionProviderTests
         Assert.DoesNotContain("eror", client.LastProtectedText, StringComparison.Ordinal);
         Assert.NotNull(result.LunaExecution);
         Assert.Equal("baseline", result.LunaExecution.PromptProfile);
-        Assert.Equal("none", result.LunaExecution.Effort);
+        Assert.Equal("low", result.LunaExecution.Effort);
         Assert.Equal("priority", result.LunaExecution.ServiceTier);
         Assert.Equal("full-v1", result.LunaExecution.Protocol);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_SerializesReadableModelInputAndRoundTripsItExactly()
+    {
+        const string original = "Grüße > \"Zitat\" \\ literal\r\nLink: https://example.test/a";
+        string? capturedInputJson = null;
+        var client = new FakeClient(_ => "{\"corrected_text\":\"\"}")
+        {
+            StructuredResponse = inputJson =>
+            {
+                capturedInputJson = inputJson;
+                return "{\"edits\":[]}";
+            }
+        };
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: 0,
+            outputProtocol: LunaOutputProtocol.SpanEdits);
+
+        var result = await provider.CorrectAsync(original, CancellationToken.None);
+
+        Assert.Equal(original, result.CorrectedText);
+        Assert.NotNull(capturedInputJson);
+        Assert.Contains("Grüße >", capturedInputJson, StringComparison.Ordinal);
+        Assert.Contains("⟦CLF_PROTECTED_", capturedInputJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u003E", capturedInputJson, StringComparison.OrdinalIgnoreCase);
+
+        using var inputDocument = JsonDocument.Parse(capturedInputJson);
+        var modelText = inputDocument.RootElement.GetProperty("source_text").GetString();
+        Assert.NotNull(modelText);
+        Assert.Contains("Grüße >", modelText, StringComparison.Ordinal);
+        Assert.Contains("\"Zitat\" \\ literal\r\nLink: ⟦CLF_PROTECTED_", modelText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -112,7 +148,7 @@ public sealed class LunaCorrectionProviderTests
 
         Assert.Equal("baseline", profile.PromptVariant);
         Assert.Equal(LunaPromptCatalog.Baseline, profile.DeveloperInstructions);
-        Assert.Equal("none", profile.Effort);
+        Assert.Equal("low", profile.Effort);
         Assert.Equal("priority", profile.ServiceTier);
         Assert.Equal(LunaOutputProtocol.FullText, profile.OutputProtocol);
         Assert.Equal("full-v1", profile.ProtocolName);
@@ -164,6 +200,132 @@ public sealed class LunaCorrectionProviderTests
         Assert.Equal(first.CorrectedText, second.CorrectedText);
         Assert.Equal(1, client.RunCount);
         Assert.Equal(TimeSpan.Zero, second.Elapsed);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_PropagatesProfileResolutionFailureBeforeReadingCache()
+    {
+        var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text + "!" }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+
+        var first = await provider.CorrectAsync("Das ist korrekt.", CancellationToken.None);
+        client.HasCompatibleProfile = false;
+
+        await Assert.ThrowsAsync<CodexAppServerException>(() =>
+            provider.CorrectAsync("Das ist korrekt.", CancellationToken.None));
+
+        Assert.Equal("Das ist korrekt.!", first.CorrectedText);
+        Assert.Equal(1, client.RunCount);
+        Assert.Equal(2, client.ProfileResolveCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_SeparatesCacheEntriesByEveryResolvedModelProfileField()
+    {
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new { corrected_text = "Der Text." }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+        client.Selection = new LunaModelSelection("gpt-5.6-luna", "low", "priority");
+
+        var first = await provider.CorrectAsync("Der Tset.", CancellationToken.None);
+        client.Selection = new LunaModelSelection("gpt-6-luna", "low", "priority");
+        var second = await provider.CorrectAsync("Der Tset.", CancellationToken.None);
+        client.Selection = new LunaModelSelection("gpt-6-luna", "low", "standard");
+        var third = await provider.CorrectAsync("Der Tset.", CancellationToken.None);
+        client.Selection = new LunaModelSelection("gpt-6-luna", "medium", "standard");
+        var fourth = await provider.CorrectAsync("Der Tset.", CancellationToken.None);
+        var cached = await provider.CorrectAsync("Der Tset.", CancellationToken.None);
+
+        Assert.Equal(4, client.RunCount);
+        Assert.Equal(5, client.ProfileResolveCount);
+        Assert.Equal("gpt-5.6-luna", first.LunaExecution!.Model);
+        Assert.Equal("gpt-6-luna", second.LunaExecution!.Model);
+        Assert.Equal("standard", third.LunaExecution!.ServiceTier);
+        Assert.Equal("medium", fourth.LunaExecution!.Effort);
+        Assert.Equal("gpt-6-luna", cached.LunaExecution!.Model);
+        Assert.Equal("medium", cached.LunaExecution.Effort);
+        Assert.Equal("standard", cached.LunaExecution.ServiceTier);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_KeepsOneImmutableProfileAcrossParallelRuns()
+    {
+        var firstSelection = new LunaModelSelection("gpt-5.6-luna", "low", "priority");
+        var secondSelection = new LunaModelSelection("gpt-6-luna", "low", "priority");
+        var firstRunStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstRun = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new FakeClient(text => JsonSerializer.Serialize(new { corrected_text = text }))
+        {
+            BeforeRunAsync = async (selection, cancellationToken) =>
+            {
+                if (selection == firstSelection)
+                {
+                    firstRunStarted.TrySetResult(true);
+                    await releaseFirstRun.Task.WaitAsync(cancellationToken);
+                }
+            }
+        };
+        client.Selection = firstSelection;
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"), cacheEnabled: false);
+
+        var firstTask = provider.CorrectAsync("Erster Text.", CancellationToken.None);
+        await firstRunStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        client.Selection = secondSelection;
+        var second = await provider.CorrectAsync("Zweiter Text.", CancellationToken.None);
+        releaseFirstRun.TrySetResult(true);
+        var first = await firstTask;
+
+        Assert.Equal(firstSelection, client.RunSelections[0]);
+        Assert.Equal(secondSelection, client.RunSelections[1]);
+        Assert.Equal(firstSelection.Model, first.LunaExecution!.Model);
+        Assert.Equal(secondSelection.Model, second.LunaExecution!.Model);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_UsesTheSameResolvedProfileForStructuredAttemptAndFallback()
+    {
+        var selection = new LunaModelSelection("gpt-5.6-luna", "low", "priority");
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new { corrected_text = "Das ist korrekt." }))
+        {
+            StructuredResponse = _ => "{\"edits\":[{\"start\":999,\"length\":0,\"text\":\"ungueltig\"}]}"
+        };
+        client.Selection = selection;
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: 0,
+            outputProtocol: LunaOutputProtocol.SpanEdits);
+
+        var result = await provider.CorrectAsync("Das ist korekt.", CancellationToken.None);
+
+        Assert.Equal("Das ist korrekt.", result.CorrectedText);
+        Assert.Equal(selection, Assert.Single(client.StructuredSelections));
+        Assert.Equal(selection, Assert.Single(client.RunSelections));
+        Assert.Equal(selection.Model, result.LunaExecution!.Model);
+        Assert.True(result.LunaExecution.FallbackUsed);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_PreservesResolvedProfileAcrossTimedProtocolAndFallback()
+    {
+        var selection = new LunaModelSelection("gpt-5.6-luna", "low", "priority");
+        var client = new TimedFakeClient(
+            selection,
+            "{\"edits\":[{\"start\":999,\"length\":0,\"text\":\"ungueltig\"}]}",
+            "{\"corrected_text\":\"Das ist korrekt.\"}");
+        var provider = new LunaCorrectionProvider(
+            client,
+            new AppLocalizer("de"),
+            cacheEnabled: false,
+            patchThreshold: 0,
+            outputProtocol: LunaOutputProtocol.SpanEdits);
+
+        var result = await provider.CorrectAsync("Das ist korekt.", CancellationToken.None);
+
+        Assert.Equal("Das ist korrekt.", result.CorrectedText);
+        Assert.Equal(new[] { selection, selection }, client.Selections);
+        Assert.Equal(selection.Model, result.LunaExecution!.Model);
+        Assert.True(result.LunaExecution.FallbackUsed);
     }
 
     [Fact]
@@ -260,15 +422,15 @@ public sealed class LunaCorrectionProviderTests
     }
 
     [Fact]
-    public async Task TestAsync_RequiresChatGptAndLunaFast()
+    public async Task TestAsync_RequiresChatGptAndCompatibleLunaProfile()
     {
         var noLogin = new FakeClient(text => text) { Account = new CodexAccountState(true, false) };
-        var noLow = new FakeClient(text => text) { SupportsLow = false };
+        var noProfile = new FakeClient(text => text) { HasCompatibleProfile = false };
 
         await Assert.ThrowsAsync<CodexAppServerException>(() =>
             new LunaCorrectionProvider(noLogin, new AppLocalizer("en")).TestAsync(CancellationToken.None));
         await Assert.ThrowsAsync<CodexAppServerException>(() =>
-            new LunaCorrectionProvider(noLow, new AppLocalizer("en")).TestAsync(CancellationToken.None));
+            new LunaCorrectionProvider(noProfile, new AppLocalizer("en")).TestAsync(CancellationToken.None));
     }
 
     [Theory]
@@ -290,32 +452,125 @@ public sealed class LunaCorrectionProviderTests
 
     private sealed class FakeClient(Func<string, string> response) : ICodexAppServerClient, IStructuredCodexCorrectionClient
     {
+        private readonly ConcurrentQueue<LunaModelSelection> _runSelections = new();
+        private readonly ConcurrentQueue<LunaModelSelection> _structuredSelections = new();
+        private int _runCount;
+        private int _structuredRunCount;
+        private int _profileResolveCount;
+
         public CodexAccountState Account { get; set; } = new(true, true);
-        public bool SupportsLow { get; set; } = true;
+        public bool HasCompatibleProfile { get; set; } = true;
+        public LunaModelSelection Selection { get; set; } = new("gpt-5.6-luna", "low", "priority");
         public string? LastProtectedText { get; private set; }
-        public int RunCount { get; private set; }
-        public int StructuredRunCount { get; private set; }
+        public int RunCount => Volatile.Read(ref _runCount);
+        public int StructuredRunCount => Volatile.Read(ref _structuredRunCount);
+        public int ProfileResolveCount => Volatile.Read(ref _profileResolveCount);
+        public IReadOnlyList<LunaModelSelection> RunSelections => _runSelections.ToArray();
+        public IReadOnlyList<LunaModelSelection> StructuredSelections => _structuredSelections.ToArray();
+        public Func<LunaModelSelection, CancellationToken, Task>? BeforeRunAsync { get; init; }
         public Func<string, string>? StructuredResponse { get; init; }
 
         public Task<CodexAccountState> GetAccountAsync(CancellationToken cancellationToken) => Task.FromResult(Account);
         public Task ConnectChatGptAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task<bool> SupportsLunaAsync(CancellationToken cancellationToken) => Task.FromResult(SupportsLow);
-        public Task<string> RunCorrectionAsync(string protectedText, CancellationToken cancellationToken)
+        public Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken)
         {
-            RunCount++;
+            Interlocked.Increment(ref _profileResolveCount);
+            if (!HasCompatibleProfile)
+                throw new CodexAppServerException("No supported Luna profile.");
+            return Task.FromResult(Selection);
+        }
+        public async Task<string> RunCorrectionAsync(
+            string protectedText,
+            LunaModelSelection selection,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _runCount);
+            _runSelections.Enqueue(selection);
             LastProtectedText = protectedText;
-            return Task.FromResult(response(protectedText));
+            if (BeforeRunAsync is { } beforeRun)
+                await beforeRun(selection, cancellationToken).ConfigureAwait(false);
+            return response(protectedText);
         }
         public Task<string> RunStructuredCorrectionAsync(
             string inputJson,
             JsonElement outputSchema,
             string developerInstructions,
-            string effort,
+            LunaModelSelection selection,
             CancellationToken cancellationToken)
         {
-            StructuredRunCount++;
+            Interlocked.Increment(ref _structuredRunCount);
+            _structuredSelections.Enqueue(selection);
             return Task.FromResult((StructuredResponse ?? throw new InvalidOperationException())(inputJson));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class TimedFakeClient(
+        LunaModelSelection selection,
+        params string[] responses) : ICodexAppServerClient, IStructuredCodexCorrectionClient, ILunaTimedTransportClient
+    {
+        private readonly ConcurrentQueue<LunaModelSelection> _selections = new();
+        private readonly ConcurrentQueue<string> _responses = new(responses);
+
+        public IReadOnlyList<LunaModelSelection> Selections => _selections.ToArray();
+
+        public Task<CodexAccountState> GetAccountAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new CodexAccountState(true, true));
+
+        public Task ConnectChatGptAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<LunaModelSelection> ResolveLunaProfileAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(selection);
+
+        public Task<string> RunCorrectionAsync(
+            string protectedText,
+            LunaModelSelection resolvedSelection,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("The timed transport should be used.");
+
+        public Task<string> RunStructuredCorrectionAsync(
+            string inputJson,
+            JsonElement outputSchema,
+            string developerInstructions,
+            LunaModelSelection resolvedSelection,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("The timed transport should be used.");
+
+        public Task<LunaTransportExecution> RunStructuredCorrectionWithTimingAsync(
+            string inputJson,
+            JsonElement outputSchema,
+            string developerInstructions,
+            LunaModelSelection resolvedSelection,
+            CancellationToken cancellationToken,
+            bool replenishPreparedThread = false)
+        {
+            _selections.Enqueue(resolvedSelection);
+            if (!_responses.TryDequeue(out var response))
+                throw new InvalidOperationException("No fake response remains.");
+
+            var profile = new LunaCorrectionProfile(
+                resolvedSelection.Model,
+                resolvedSelection.Effort,
+                resolvedSelection.ServiceTier,
+                "test",
+                "runtime",
+                developerInstructions);
+            var timing = new LunaProtocolTiming(
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                TimeSpan.Zero);
+            return Task.FromResult(new LunaTransportExecution(
+                response,
+                profile,
+                timing,
+                "thread",
+                "turn",
+                false));
+        }
+
         public void Dispose() { }
     }
 }

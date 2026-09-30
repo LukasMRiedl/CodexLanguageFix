@@ -36,12 +36,19 @@ public sealed class LiveFormatRegressionTests(ITestOutputHelper output)
         using var lunaClient = new CodexAppServerClient(
             LunaLiveRuntime.CreateDirectory(), localizer);
         string? lunaUnavailable = null;
+        string? selectedLunaModel = null;
         try
         {
             if (!(await lunaClient.GetAccountAsync(CancellationToken.None)).IsChatGpt)
                 lunaUnavailable = "ChatGPT-OAuth unavailable";
-            else if (!await lunaClient.SupportsLunaAsync(CancellationToken.None))
-                lunaUnavailable = "production Luna/none/priority capability unavailable";
+            else
+            {
+                var selection = await lunaClient.ResolveLunaProfileAsync(CancellationToken.None);
+                if (selection.Effort != "low" || selection.ServiceTier != "priority")
+                    lunaUnavailable = "production Luna/low/priority capability unavailable";
+                else
+                    selectedLunaModel = selection.Model;
+            }
         }
         catch (Exception exception)
         {
@@ -78,12 +85,20 @@ public sealed class LiveFormatRegressionTests(ITestOutputHelper output)
                     var result = await provider.CorrectAsync(testCase.Original, CancellationToken.None);
                     var structure = TextStructure.IsPreserved(testCase.Original, result.CorrectedText);
                     var accepted = string.Equals(testCase.Expected, result.CorrectedText, StringComparison.Ordinal);
+                    var profileMatches = provider.Kind != CorrectionProviderKind.Luna
+                        || result.LunaExecution is { } execution
+                           && execution.Model == selectedLunaModel
+                           && execution.Effort == "low"
+                           && execution.ServiceTier == "priority";
                     // Exact outputs include every protected span, multiplicity, order and control character.
-                    return (provider.Kind, timer.Elapsed, Failure: structure && accepted ? null
-                        : $"{provider.Kind}/{testCase.Id}: structure={structure}, accepted={accepted}");
+                    return (provider.Kind, timer.Elapsed, Failure: structure && accepted && profileMatches ? null
+                        : $"{provider.Kind}/{testCase.Id}: structure={structure}, accepted={accepted}, profile={profileMatches}");
                 }
                 catch (Exception exception)
                 {
+                    // These fixtures contain only synthetic text; retain the failing
+                    // validation location without recording a provider response.
+                    output.WriteLine($"{provider.Kind}/{testCase.Id}: {exception}");
                     return (provider.Kind, timer.Elapsed,
                         Failure: $"{provider.Kind}/{testCase.Id}: {exception.GetType().Name}");
                 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodexLanguageFix.Contracts;
@@ -73,9 +74,27 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             throw new LanguageFixException(localizer.Get(AppText.PromptTooLongGeneric, text.Length, MaximumPromptLength));
         }
 
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        var stopwatch = Stopwatch.StartNew();
+
+        // The App Server resolves and caches this profile for its current runtime.
+        // Resolve it before consulting the correction cache so a changed runtime
+        // profile can never reuse a result produced by another model.
+        LunaModelSelection selection;
+        try
+        {
+            selection = await client.ResolveLunaProfileAsync(timeout.Token).ConfigureAwait(false);
+            timeout.Token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new LanguageFixException(localizer.Get(AppText.LunaTimeout));
+        }
+
         var cacheKey = LunaCorrectionCache.CreateKey(
             text,
-            $"{CodexAppServerClient.LunaModel}\0{CodexAppServerClient.LunaEffort}\0adaptive-v3-{_outputProtocol}-{_patchThreshold}\0{DeveloperPrompt}");
+            $"{selection.Model}\0{selection.Effort}\0{selection.ServiceTier}\0adaptive-v3-{_outputProtocol}-{_patchThreshold}\0{DeveloperPrompt}");
         if (_cache?.TryGet(cacheKey, out var cached) == true)
         {
             return new CorrectionProviderResult(
@@ -89,14 +108,12 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
                     cached.CorrectedText,
                     cached.ChangeCount,
                     fallbackUsed: false,
-                    LunaCorrectionTimings.Empty)
+                    LunaCorrectionTimings.Empty,
+                    selection)
             };
         }
 
-        var stopwatch = Stopwatch.StartNew();
         var protectedText = LunaProtectedText.Create(text);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(60));
         string restored;
         int changeCount;
         var fallbackUsed = false;
@@ -114,11 +131,13 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
                         structuredClient,
                         protectedText,
                         text.Length,
+                        selection,
                         timeout.Token).ConfigureAwait(false)
                     : await TryCorrectWithSegmentsAsync(
                         structuredClient,
                         protectedText,
                         text.Length,
+                        selection,
                         timeout.Token).ConfigureAwait(false);
                 if (structuredAttempt.Correction is { } structuredCorrection)
                 {
@@ -136,7 +155,11 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
                     }
 
                     fallbackUsed = true;
-                    var full = await CorrectFullTextAsync(protectedText, text, timeout.Token).ConfigureAwait(false);
+                    var full = await CorrectFullTextAsync(
+                        protectedText,
+                        text,
+                        selection,
+                        timeout.Token).ConfigureAwait(false);
                     restored = full.Restored;
                     changeCount = full.ChangeCount;
                     validation = full.Validation;
@@ -146,7 +169,11 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             }
             else
             {
-                var full = await CorrectFullTextAsync(protectedText, text, timeout.Token).ConfigureAwait(false);
+                var full = await CorrectFullTextAsync(
+                    protectedText,
+                    text,
+                    selection,
+                    timeout.Token).ConfigureAwait(false);
                 restored = full.Restored;
                 changeCount = full.ChangeCount;
                 validation = full.Validation;
@@ -174,25 +201,28 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         var timings = CreateTransportIndependentTimings(transportTiming, validation, restoration);
         return new CorrectionProviderResult(restored, changeCount, Kind, null, stopwatch.Elapsed)
         {
-            LunaExecution = CreateExecution(restored, changeCount, fallbackUsed, timings)
+            LunaExecution = CreateExecution(restored, changeCount, fallbackUsed, timings, selection)
         };
     }
 
     private async Task<CorrectionPayload> CorrectFullTextAsync(
         LunaProtectedText protectedText,
         string original,
+        LunaModelSelection selection,
         CancellationToken cancellationToken)
     {
         string raw;
         LunaProtocolTiming? transportTiming = null;
         if (client is ILunaTimedTransportClient timedClient)
         {
-            var inputJson = JsonSerializer.Serialize(new { source_text = protectedText.Text });
+            var inputJson = JsonSerializer.Serialize(
+                new { source_text = protectedText.Text },
+                ModelInputSerializerOptions);
             var execution = await timedClient.RunStructuredCorrectionWithTimingAsync(
                 inputJson,
                 OutputSchema,
                 DeveloperPrompt,
-                CodexAppServerClient.LunaEffort,
+                selection,
                 cancellationToken,
                 replenishPreparedThread: _usePreparedThreads).ConfigureAwait(false);
             raw = execution.Response;
@@ -200,7 +230,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         }
         else
         {
-            raw = await client.RunCorrectionAsync(protectedText.Text, cancellationToken).ConfigureAwait(false);
+            raw = await client.RunCorrectionAsync(protectedText.Text, selection, cancellationToken).ConfigureAwait(false);
         }
         LunaResponse response;
         var validationStopwatch = Stopwatch.StartNew();
@@ -241,6 +271,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         IStructuredCodexCorrectionClient structuredClient,
         LunaProtectedText protectedText,
         int originalLength,
+        LunaModelSelection selection,
         CancellationToken cancellationToken)
     {
         var document = LunaSegmentedDocument.Create(protectedText.Text);
@@ -249,6 +280,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             document,
             protectedText,
             originalLength,
+            selection,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -257,17 +289,21 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         LunaSegmentedDocument document,
         LunaProtectedText protectedText,
         int originalLength,
+        LunaModelSelection selection,
         CancellationToken cancellationToken)
     {
-        var inputJson = JsonSerializer.Serialize(new
-        {
-            segments = document.Segments.Select(segment => new { id = segment.Id, text = segment.Text })
-        });
+        var inputJson = JsonSerializer.Serialize(
+            new
+            {
+                segments = document.Segments.Select(segment => new { id = segment.Id, text = segment.Text })
+            },
+            ModelInputSerializerOptions);
         var (raw, transportTiming) = await RunStructuredAsync(
             structuredClient,
             inputJson,
             PatchOutputSchema,
             DeveloperPrompt + LunaPromptCatalog.PatchProtocol,
+            selection,
             cancellationToken).ConfigureAwait(false);
         try
         {
@@ -308,14 +344,18 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         IStructuredCodexCorrectionClient structuredClient,
         LunaProtectedText protectedText,
         int originalLength,
+        LunaModelSelection selection,
         CancellationToken cancellationToken)
     {
-        var inputJson = JsonSerializer.Serialize(new { source_text = protectedText.Text });
+        var inputJson = JsonSerializer.Serialize(
+            new { source_text = protectedText.Text },
+            ModelInputSerializerOptions);
         var (raw, transportTiming) = await RunStructuredAsync(
             structuredClient,
             inputJson,
             SpanEditOutputSchema,
             DeveloperPrompt + LunaPromptCatalog.SpanEditProtocol,
+            selection,
             cancellationToken).ConfigureAwait(false);
         try
         {
@@ -361,6 +401,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         string inputJson,
         JsonElement outputSchema,
         string developerInstructions,
+        LunaModelSelection selection,
         CancellationToken cancellationToken)
     {
         if (client is ILunaTimedTransportClient timedClient)
@@ -369,7 +410,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
                 inputJson,
                 outputSchema,
                 developerInstructions,
-                CodexAppServerClient.LunaEffort,
+                selection,
                 cancellationToken,
                 replenishPreparedThread: _usePreparedThreads).ConfigureAwait(false);
             return (execution.Response, execution.Timing);
@@ -379,7 +420,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             inputJson,
             outputSchema,
             developerInstructions,
-            CodexAppServerClient.LunaEffort,
+            selection,
             cancellationToken).ConfigureAwait(false);
         return (raw, null);
     }
@@ -449,7 +490,8 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         string correctedText,
         int changeCount,
         bool fallbackUsed,
-        LunaCorrectionTimings timings)
+        LunaCorrectionTimings timings,
+        LunaModelSelection selection)
     {
         var protocolName = _outputProtocol switch
         {
@@ -470,12 +512,15 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             changeCount,
             LunaProductionConfiguration.Qualified.PromptVariant,
             promptHash,
-            CodexAppServerClient.LunaEffort,
-            CodexAppServerClient.LunaServiceTier,
+            selection.Effort,
+            selection.ServiceTier,
             protocolName,
             fallbackUsed,
             correctedText.Length,
-            timings);
+            timings)
+        {
+            Model = selection.Model
+        };
     }
 
     public async Task<CorrectionProviderHealth> TestAsync(CancellationToken cancellationToken)
@@ -487,7 +532,8 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             throw new CodexAppServerException(localizer.Get(AppText.OpenAiLoginRequired));
         }
 
-        if (!await client.SupportsLunaAsync(cancellationToken).ConfigureAwait(false))
+        var selection = await client.ResolveLunaProfileAsync(cancellationToken).ConfigureAwait(false);
+        if (selection.Effort != "low" || selection.ServiceTier != "priority")
         {
             throw new CodexAppServerException(localizer.Get(AppText.LunaUnavailable));
         }
@@ -576,6 +622,11 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
             """);
         return document.RootElement.Clone();
     }
+
+    internal static JsonSerializerOptions ModelInputSerializerOptions { get; } = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private sealed class LunaResponse

@@ -42,4 +42,7 @@ public sealed record LunaCorrectionExecution(
     string Protocol,
     bool FallbackUsed,
     int OutputCharacters,
-    LunaCorrectionTimings Timings);
+    LunaCorrectionTimings Timings)
+{
+    public string Model { get; init; } = string.Empty;
+}
