@@ -6,7 +6,7 @@ A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop
 
 > This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
 
-The current source is **release candidate 1.3.1-rc.10**. It selects the newest Luna model offered by the installed Codex runtime that supports low reasoning with Fast Mode (`priority`). The `low` production profile passed live qualification with `gpt-6-luna`, 128 corpus cases and unchanged safety gates; see the [runtime report](docs/desktop-runtime-2026-09-30.md) for evidence and limitations. The earlier RC7 memory comparison measured approximately 49% less private memory and 43% less working set, short of the **80% target**. See the [memory report](docs/ram-optimization-2026-09-13.md) for its evidence and limitations. This development build has not been published as a stable release.
+The current source is **version 1.4.0**. It selects the newest Luna model offered by the installed Codex runtime that supports low reasoning with Fast Mode (`priority`). The `low` production profile passed live qualification with `gpt-6-luna`, 128 corpus cases and unchanged safety gates; see the [runtime report](docs/desktop-runtime-2026-09-30.md) for evidence and limitations. The earlier RC7 memory comparison measured approximately 49% less private memory and 43% less working set, short of the **80% target**. See the [memory report](docs/ram-optimization-2026-09-13.md) for its evidence and limitations. Version 1.4.0 is available as a stable GitHub release.
 
 ## Features
 
@@ -25,7 +25,7 @@ The current source is **release candidate 1.3.1-rc.10**. It selects the newest L
 - Requests are cancelled when the source editor or text changes, the provider changes, or correction is disabled. Partial write failures never trigger a blind full-text retry. Verified own changes are rolled back when safe; no recovery window opens.
 - No background service and no automatic updater.
 
-The expanded Aa field recognition and placement are documented in the [field diagnosis report](docs/aa-coverage-2026-10-04.md). Main-chat correction and exact undo were verified live in Codex and Hermes, including real monitor transitions between 175% and 200%. This candidate is installed locally; additional inaccessible field families are explicitly listed as unverified in the report.
+The expanded Aa field recognition and placement are documented in the [field diagnosis report](docs/aa-coverage-2026-10-04.md). Main-chat correction and exact undo were verified live in Codex and Hermes, including real monitor transitions between 175% and 200%. Version 1.4.0 is installed locally; additional inaccessible field families are explicitly listed as unverified in the report.
 
 ## Installation
 
