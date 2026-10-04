@@ -2,7 +2,7 @@
 
 ## Umfang und Freigabestatus
 
-Geprüfter Quellstand und lokale Installation: 1.3.1-rc.9.
+Geprüfter Quellstand und lokale Installation: 1.3.1-rc.10.
 Der Release-Build für win-x64 wurde erfolgreich erstellt. Die eindeutig über
 laufenden Prozess und HKCU-Autostart identifizierte Installation wurde als EXE
 unter `artifacts/aa-coverage/installed-backup-1.3.1-rc.8.exe` gesichert und ihr
@@ -10,6 +10,8 @@ SHA-256 mit der bisherigen Installation abgeglichen. Nach bestandenen Prüfungen
 wurde die eindeutig über Autostart bestimmte EXE durch den Release-Build ersetzt.
 Der installierte SHA-256 entspricht dem geprüften Kandidaten; der Autostartpfad
 bleibt derselbe. Die Sicherung der vorherigen RC8 bleibt lokal erhalten.
+Die zusätzlich installierte RC9 wurde vor der abschließenden RC10-Ergänzung ebenfalls
+gesichert (`installed-backup-1.3.1-rc.9.exe`).
 Die zusätzlichen Hermes-Formulare sind nach der nachträglichen Nutzerentscheidung
 kein verpflichtender Abnahmeumfang. Hermes-Hauptchat und Nachrichtenbearbeitung
 bleiben im Umfang. Bestehende Nachrichten wurden nicht geändert oder abgesendet;
@@ -52,6 +54,14 @@ nach Entfernung zum Anker gesucht. Ohne Anker folgt zuerst die Fußzeile. Seitli
 Ersatzpositionen bleiben unmittelbar an der Feldspanne, statt entfernte freie
 Fensterflächen zu verwenden. Text und Steuerelemente erhalten ebenfalls 4 DIP Abstand.
 
+Die abschließende Nutzeranweisung ergänzt ausschließlich für Codex eine Position
+oben rechts innerhalb des Eingaberahmens, falls die Werkzeugleiste keinen sicheren
+Platz bietet. Dafür werden aktuelle sichtbare Textrechtecke über TextPattern erfasst;
+bei fehlender oder ungültiger Textgeometrie bleibt diese Position gesperrt. Der
+gesamte Eingaberahmen ist maßgeblich, damit auch ein kurzer einzeiliger Editor
+berücksichtigt werden kann. Tatsächlicher Text und andere Bedienelemente bleiben
+geschützt. Hermes behält die zuvor geprüfte Platzierungsfolge.
+
 Diagnoseeinträge unterscheiden Host, Kategorie sowie Erkennungs- und Platzierungsgrund.
 Sie enthalten keine Texte, Kontodaten oder Anbieterantworten. Anbieterwahl,
 Strukturschutz, native Schreibtransaktionen und verifiziertes Rückgängig bleiben bestehen.
@@ -79,7 +89,7 @@ Es wurde keine Abhängigkeit hinzugefügt.
 
 ## Prüfnachweise
 
-- 570 automatische Tests ohne opt-in Live-Tests bestanden. Darunter neue Fälle für
+- 578 automatische Tests ohne opt-in Live-Tests bestanden. Darunter neue Fälle für
   Seitenplatzierung ohne Werkzeugleiste, einseitige Belegung, begrenzte Flächen,
   fehlenden Platz, Skalierungen von 100–200 % und negative Koordinaten.
 - Echte Aa-Roundtrips für eigenen Satz und Absatz-/Listenentwurf in beiden Hauptchats
@@ -95,6 +105,12 @@ Es wurde keine Abhängigkeit hinzugefügt.
   installierte EXE besteht ihn ebenfalls.
 - Installierter Hermes-Hauptchat: Aa-Korrektur und exaktes Rückgängig des eigenen
   Satzes auf dem externen Monitor ebenfalls bestanden.
+- Die neue Codex-Eckposition wurde am RC10-Kandidaten und erneut an der installierten
+  RC10-EXE ausschließlich lesend geprüft: genaue obere rechte Position im Rahmen,
+  28/4-DIP-Maße, Fenstergrenzen und Abstand zu sichtbarem Text/Bedienelementen bestanden.
+  Da inzwischen ein Nutzerentwurf sichtbar war, wurde dort kein Korrekturklick
+  ausgeführt. Die zuvor beschriebenen vollständigen Aa-Roundtrips gehören zu RC9;
+  Korrektur-, Struktur- und Rückgängigverfahren wurden für RC10 nicht geändert.
 - Eigener Hermes-Testentwurf entfernt; Leerfeld-Ausblendung der installierten
   Version erneut bestanden. Codex wird nach der Abnahme nicht mehr verändert,
   sobald in der Oberfläche ein anderer Entwurf sichtbar ist.

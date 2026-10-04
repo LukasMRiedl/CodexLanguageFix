@@ -307,14 +307,27 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
             Assert.InRange(buttonBounds.Height, 28 * scale - 1, 28 * scale + 1);
             Assert.True(original.PlacementBounds?.Contains(buttonBounds) == true,
                 "Der tatsächliche Knopf muss innerhalb des geprüften Appfensters liegen.");
-            foreach (var obstacle in (original.OccupiedBounds ?? []).Append(original.EditorBounds!.Value))
+            var insideEditor = original.EditorBounds!.Value.IntersectsWith(buttonBounds);
+            if (insideEditor)
+            {
+                Assert.Equal(ComposerHost.Codex, original.Host);
+                Assert.NotEmpty(original.EditorTextBounds!);
+                Assert.InRange(buttonBounds.Left, original.Bounds.Right - 32 * scale - 1,
+                    original.Bounds.Right - 32 * scale + 1);
+                Assert.InRange(buttonBounds.Top, original.Bounds.Top + 4 * scale - 1,
+                    original.Bounds.Top + 4 * scale + 1);
+            }
+            var protectedObstacles = insideEditor
+                ? (original.OccupiedBounds ?? []).Where(rect => rect != original.EditorBounds.Value).Concat(original.EditorTextBounds!)
+                : (original.OccupiedBounds ?? []).Append(original.EditorBounds.Value);
+            foreach (var obstacle in protectedObstacles)
             {
                 var protectedBounds = obstacle;
                 protectedBounds.Inflate(4 * scale - 1, 4 * scale - 1);
                 Assert.False(protectedBounds.IntersectsWith(buttonBounds),
                     "Der tatsächliche Knopf muss Abstand zu Text und Bedienelementen halten.");
             }
-            output.WriteLine(JsonSerializer.Serialize(new { buttonBounds, scale, perMonitorV2 = true }));
+            output.WriteLine(JsonSerializer.Serialize(new { buttonBounds, scale, insideEditor, perMonitorV2 = true }));
             ReportActivationState(app, correctWindow, original.HostWindow, "correct_before_click");
             ClickOwnButton(app, correct, original.HostWindow, () => AssertCurrentText(originalText));
             ReportActivationState(app, correctWindow, original.HostWindow, "correct_after_click");

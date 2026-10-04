@@ -363,7 +363,7 @@ public sealed class CorrectionCoordinator : IDisposable
     private void PositionOverlay(ComposerSnapshot snapshot)
     {
         _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host,
-            snapshot.EditorBounds, snapshot.OccupiedBounds, snapshot.PlacementBounds);
+            snapshot.EditorBounds, snapshot.OccupiedBounds, snapshot.PlacementBounds, snapshot.EditorTextBounds);
         LogCaptureStatus();
         var diagnostic = $"{snapshot.Host}:{snapshot.FieldCategory}:{_overlay.PlacementStatus}";
         if (_lastPlacementDiagnostic != diagnostic)

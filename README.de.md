@@ -6,7 +6,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.9**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Dieser Entwicklungsstand ist nicht als stabiler Release veröffentlicht.
+Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.10**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Dieser Entwicklungsstand ist nicht als stabiler Release veröffentlicht.
 
 ## Funktionen
 

@@ -538,7 +538,10 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             Bounds = surfaceBounds,
             RightControlBounds = toolbar.RightControlBounds,
             OccupiedBounds = toolbar.OccupiedBounds,
-            PlacementBounds = placementBounds
+            PlacementBounds = placementBounds,
+            EditorTextBounds = host == ComposerHost.Codex
+                && TryGetVisibleTextBounds(element, null) is { Count: > 0 } textBounds
+                    ? textBounds : null
         };
         if (layoutResolved)
         {

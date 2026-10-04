@@ -195,6 +195,125 @@ public sealed class SidecarPlacementTests
         Assert.False(toolbarControl.IntersectsWith(placement));
     }
 
+    [Fact]
+    public void VerifiedEmptyTextBoundsAllowTopRightPositionInsideComposer()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var scope = new Rect(0, 0, 500, 400);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [], scope, 1, placementBounds: scope, editorTextBounds: []));
+
+        Assert.Equal(28, placement.Width);
+        Assert.Equal(editor.Right - placement.Width - 4, placement.Left);
+        Assert.Equal(editor.Top + 4, placement.Top);
+        Assert.Equal(4, editor.Right - placement.Right);
+        Assert.True(editor.Contains(placement));
+        Assert.True(scope.Contains(placement));
+    }
+
+    [Fact]
+    public void ShortEditorUsesTopRightOfLargerComposerFrame()
+    {
+        var composer = new Rect(100, 100, 500, 60);
+        var editor = new Rect(120, 130, 460, 26);
+        var scope = new Rect(0, 0, 800, 600);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            composer, editor, [], scope, 1, placementBounds: scope, editorTextBounds: []));
+
+        Assert.Equal(composer.Right - placement.Width - 4, placement.Left);
+        Assert.Equal(composer.Top + 4, placement.Top);
+        Assert.True(composer.Contains(placement));
+        Assert.False(editor.Contains(placement));
+        Assert.True(scope.Contains(placement));
+    }
+
+    [Fact]
+    public void TopRightEditorPositionMustFitEveryVerifiedBoundsIntersection()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var narrowScope = new Rect(100, 100, 160, 100);
+        var screen = new Rect(0, 0, 800, 600);
+
+        Assert.Null(OverlayPlacement.Find(editor, editor, [], screen, 1,
+            placementBounds: narrowScope, editorTextBounds: []));
+    }
+
+    [Fact]
+    public void TextInTopRightPositionFallsBackToTheExistingSidecar()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var scope = new Rect(0, 0, 500, 400);
+        var blockedInnerPosition = new Rect(editor.Right - 32, editor.Top + 4, 28, 28);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [], scope, 1, placementBounds: scope,
+            editorTextBounds: [blockedInnerPosition]));
+
+        Assert.Equal(editor.Right + 4, placement.Left);
+        Assert.Equal(editor.Bottom - placement.Height, placement.Top);
+    }
+
+    [Fact]
+    public void ActualTextBoundsEqualToEditorStillBlockTopRightComposerPosition()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var scope = new Rect(0, 0, 500, 400);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [], scope, 1, placementBounds: scope, editorTextBounds: [editor]));
+
+        Assert.Equal(editor.Right + 4, placement.Left);
+        Assert.Equal(editor.Bottom - placement.Height, placement.Top);
+    }
+
+    [Fact]
+    public void OtherControlInTopRightPositionFallsBackToTheExistingSidecar()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var scope = new Rect(0, 0, 500, 400);
+        var blockingControl = new Rect(editor.Right - 32, editor.Top + 4, 28, 28);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [blockingControl], scope, 1, placementBounds: scope,
+            editorTextBounds: []));
+
+        Assert.Equal(editor.Right + 4, placement.Left);
+        Assert.Equal(editor.Bottom - placement.Height, placement.Top);
+    }
+
+    [Fact]
+    public void MissingOrInvalidTextBoundsKeepTheExistingSidecarBehavior()
+    {
+        var editor = new Rect(100, 100, 200, 100);
+        var scope = new Rect(0, 0, 500, 400);
+
+        var missing = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [], scope, 1, placementBounds: scope, editorTextBounds: null));
+        var invalid = Assert.IsType<Rect>(OverlayPlacement.Find(
+            editor, editor, [], scope, 1, placementBounds: scope,
+            editorTextBounds: [new Rect(0, 0, 0, 1)]));
+
+        Assert.Equal(editor.Right + 4, missing.Left);
+        Assert.Equal(editor.Right + 4, invalid.Left);
+    }
+
+    [Fact]
+    public void ExistingToolbarPositionPrecedesVerifiedTopRightEditorPosition()
+    {
+        var composer = new Rect(100, 100, 400, 300);
+        var editor = new Rect(180, 150, 150, 80);
+        var toolbarControl = new Rect(180, 235, 60, 40);
+        var scope = new Rect(0, 0, 1000, 800);
+
+        var placement = Assert.IsType<Rect>(OverlayPlacement.Find(
+            composer, editor, [toolbarControl], scope, 1, toolbarControl, scope, []));
+
+        Assert.Equal(toolbarControl.Left - 4 - 28, placement.Left);
+        Assert.Equal(toolbarControl.Top + (toolbarControl.Height - 28) / 2, placement.Top);
+    }
+
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]

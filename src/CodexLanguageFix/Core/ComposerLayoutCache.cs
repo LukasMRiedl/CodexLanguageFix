@@ -32,7 +32,8 @@ internal sealed class ComposerLayoutCache
             Bounds = previous.Bounds,
             RightControlBounds = previous.RightControlBounds,
             OccupiedBounds = previous.OccupiedBounds,
-            PlacementBounds = previous.PlacementBounds
+            PlacementBounds = previous.PlacementBounds,
+            EditorTextBounds = previous.EditorTextBounds
         };
     }
 }

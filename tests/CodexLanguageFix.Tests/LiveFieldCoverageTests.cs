@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows.Automation;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
+using CodexLanguageFix.Infrastructure;
 using CodexLanguageFix.Windows;
 using Xunit.Abstractions;
 
@@ -12,6 +13,41 @@ namespace CodexLanguageFix.Tests;
 [Collection("Live desktop correction")]
 public sealed class LiveFieldCoverageTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void FocusedCodexCorner_ReadOnlyOverlayAudit()
+    {
+        if (Environment.GetEnvironmentVariable("LANGUAGE_FIX_CODEX_CORNER_AUDIT") != "1") return;
+        using var dpiScope = new LiveDpiScope();
+        var accessor = new CodexComposerAccessor();
+        var snapshot = accessor.TryCaptureFocusedComposer();
+        Assert.NotNull(snapshot);
+        Assert.Equal(ComposerHost.Codex, snapshot.Host);
+        Assert.NotEmpty(snapshot.EditorTextBounds!);
+        using var app = Assert.Single(Process.GetProcessesByName("CodexLanguageFix"));
+        var name = new AppLocalizer(new SettingsService().Load().Language).Get(AppText.CorrectAutomationName);
+        var button = Assert.Single(AutomationElement.RootElement.FindAll(TreeScope.Descendants,
+            new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, app.Id),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                new PropertyCondition(AutomationElement.NameProperty, name),
+                new PropertyCondition(AutomationElement.IsOffscreenProperty, false))).Cast<AutomationElement>());
+        var bounds = button.Current.BoundingRectangle;
+        var scale = GetDpiForWindow(snapshot.HostWindow) / 96d;
+        Assert.InRange(bounds.Left, snapshot.Bounds.Right - 32 * scale - 1, snapshot.Bounds.Right - 32 * scale + 1);
+        Assert.InRange(bounds.Top, snapshot.Bounds.Top + 4 * scale - 1, snapshot.Bounds.Top + 4 * scale + 1);
+        Assert.True(snapshot.Bounds.Contains(bounds) && snapshot.PlacementBounds!.Value.Contains(bounds));
+        Assert.InRange(bounds.Width, 28 * scale - 1, 28 * scale + 1);
+        Assert.InRange(bounds.Height, 28 * scale - 1, 28 * scale + 1);
+        foreach (var obstacle in (snapshot.OccupiedBounds ?? []).Where(rect => rect != snapshot.EditorBounds)
+            .Concat(snapshot.EditorTextBounds!))
+        {
+            var protectedBounds = obstacle;
+            protectedBounds.Inflate(4 * scale - 1, 4 * scale - 1);
+            Assert.False(protectedBounds.IntersectsWith(bounds));
+        }
+        output.WriteLine(JsonSerializer.Serialize(new { button = bounds, composer = snapshot.Bounds, scale,
+            textAreas = snapshot.EditorTextBounds!.Count }));
+    }
+
     [Fact]
     public void FocusedField_ReadOnlyEligibilityAudit()
     {
@@ -83,15 +119,26 @@ public sealed class LiveFieldCoverageTests(ITestOutputHelper output)
         var screen = new System.Windows.Rect(monitor.Work.Left, monitor.Work.Top,
             monitor.Work.Right - monitor.Work.Left, monitor.Work.Bottom - monitor.Work.Top);
         var placement = OverlayPlacement.Find(first.Bounds, first.EditorBounds!.Value,
-            first.OccupiedBounds ?? [], screen, scale, first.RightControlBounds, placementBounds);
+            first.OccupiedBounds ?? [], screen, scale, first.RightControlBounds, placementBounds, first.EditorTextBounds);
         output.WriteLine(JsonSerializer.Serialize(new { first.Host, first.FieldCategory, first.ReadMethod,
             editor = first.EditorBounds, surface = first.Bounds, placementBounds, placement,
-            obstacles = first.OccupiedBounds?.Count, scale, screen }));
+            obstacles = first.OccupiedBounds?.Count, textBounds = first.EditorTextBounds, scale, screen }));
         Assert.True(placement is not null, "Es wurde keine freie Aa-Position für das vorbereitete Feld gefunden.");
         Assert.True(placementBounds.Contains(placement!.Value));
         Assert.True(screen.Contains(placement.Value));
-        Assert.False(first.EditorBounds.Value.IntersectsWith(placement.Value));
-        Assert.DoesNotContain(first.OccupiedBounds ?? [], obstacle => obstacle.IntersectsWith(placement.Value));
+        var insideEditor = first.EditorBounds.Value.IntersectsWith(placement.Value);
+        if (insideEditor)
+        {
+            Assert.Equal(ComposerHost.Codex, first.Host);
+            Assert.NotEmpty(first.EditorTextBounds!);
+            Assert.Equal(first.Bounds.Right - 32 * scale, placement.Value.Left, 2);
+            Assert.Equal(first.Bounds.Top + 4 * scale, placement.Value.Top, 2);
+        }
+        else Assert.False(first.EditorBounds.Value.IntersectsWith(placement.Value));
+        var protectedBounds = insideEditor
+            ? (first.OccupiedBounds ?? []).Where(rect => rect != first.EditorBounds.Value).Concat(first.EditorTextBounds!)
+            : first.OccupiedBounds ?? [];
+        Assert.DoesNotContain(protectedBounds, obstacle => obstacle.IntersectsWith(placement.Value));
         var layoutCount = accessor.LayoutCaptureCount;
         Thread.Sleep(760);
         stopwatch.Restart();

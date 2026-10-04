@@ -5,7 +5,8 @@ namespace CodexLanguageFix.Core;
 internal static class OverlayPlacement
 {
     internal static Rect? Find(Rect composer, Rect editor, IReadOnlyList<Rect> occupied,
-        Rect screen, double scale, Rect? preferredControl = null, Rect? placementBounds = null)
+        Rect screen, double scale, Rect? preferredControl = null, Rect? placementBounds = null,
+        IReadOnlyList<Rect>? editorTextBounds = null)
     {
         if (!IsValid(composer) || !IsValid(editor) || !IsValid(screen)
             || !double.IsFinite(scale) || scale <= 0
@@ -82,6 +83,13 @@ internal static class OverlayPlacement
             }
         }
 
+        var inEditorPlacement = FindInComposer(composer, editor, obstacles, screen,
+            size, gap, placementBounds, editorTextBounds);
+        if (inEditorPlacement is not null)
+        {
+            return inEditorPlacement;
+        }
+
         // Sidecar placement requires verified application/window bounds. These may include safe
         // space beside the composer, but candidates must also remain inside the monitor work area.
         if (placementBounds is not { } sidecarBounds)
@@ -118,6 +126,36 @@ internal static class OverlayPlacement
 
         return FindOnFixedY(sidecarArea, obstacles, size, gap,
             editor.Top - size - gap, editor.Left, editor.Right, editor.Right - size);
+    }
+
+    private static Rect? FindInComposer(Rect composer, Rect editor, IReadOnlyList<Rect> obstacles,
+        Rect screen, double size, double gap, Rect? placementBounds,
+        IReadOnlyList<Rect>? editorTextBounds)
+    {
+        if (placementBounds is not { } verifiedBounds || editorTextBounds is null
+            || editorTextBounds.Any(bounds => !IsValid(bounds)))
+        {
+            return null;
+        }
+
+        var area = Intersect(Intersect(composer, verifiedBounds), screen);
+        if (!IsValid(area))
+        {
+            return null;
+        }
+
+        var innerObstacles = obstacles.Where(bounds => !bounds.Equals(editor)).ToList();
+        innerObstacles.AddRange(editorTextBounds);
+        var x = composer.Right - size - gap;
+        var y = composer.Top + gap;
+        if (!TryCandidate(x, y, size, out var candidate)
+            || !area.Contains(candidate)
+            || !IsClear(candidate, innerObstacles, gap))
+        {
+            return null;
+        }
+
+        return candidate;
     }
 
     private static Rect? FindOnFixedX(Rect area, IReadOnlyList<Rect> obstacles,
