@@ -6,7 +6,7 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.8**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Dieser Entwicklungsstand ist nicht als stabiler Release veröffentlicht.
+Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.9**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Dieser Entwicklungsstand ist nicht als stabiler Release veröffentlicht.
 
 ## Funktionen
 
@@ -24,6 +24,8 @@ Der aktuelle Quellstand ist **Release-Kandidat 1.3.1-rc.8**. Er wählt das neues
 - Der kompakte Knopf erscheint nur auf einer geprüften freien Fläche am eindeutig zugeordneten Composer. Bei unklarer Zuordnung oder Platzmangel wird er ausgeblendet. Die Positionierung berücksichtigt die Skalierung des Zielmonitors und negative Bildschirmkoordinaten.
 - Änderungen am Ausgangstext, Editor- oder Anbieterwechsel sowie Deaktivierung brechen laufende Anfragen ab. Nach unklaren Teilschreibfehlern gibt es keinen blinden Volltextersatz. Eigene verifizierte Änderungen werden nach Möglichkeit sicher zurückgenommen; es öffnet sich kein Wiederherstellungsfenster.
 - Kein Hintergrunddienst und keine automatische Updatefunktion.
+
+Die erweiterte Aa-Felderkennung und Platzierung wird im [Felderdiagnosebericht](docs/aa-coverage-2026-10-04.md) dokumentiert. Hauptchat-Korrektur und exaktes Rückgängig wurden in Codex und Hermes live geprüft, ebenso reale Monitorwechsel zwischen 175 % und 200 %. Dieser Kandidat ist lokal installiert; zusätzliche, nicht erreichbare Feldfamilien werden im Bericht ausdrücklich als ungeprüft ausgewiesen.
 
 ## Installation
 

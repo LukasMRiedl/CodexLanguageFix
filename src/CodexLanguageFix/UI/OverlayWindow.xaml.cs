@@ -24,6 +24,7 @@ public partial class OverlayWindow : Window
     private HwndSource? _statusPopupSource;
 
     internal int StatusStateChangeCount { get; private set; }
+    internal string PlacementStatus { get; private set; } = "not_attempted";
 
     public OverlayWindow(AppLocalizer? localizer = null)
     {
@@ -115,8 +116,10 @@ public partial class OverlayWindow : Window
         Rect? rightControlBounds = null,
         ComposerHost host = ComposerHost.Codex,
         Rect? editorBounds = null,
-        IReadOnlyList<Rect>? occupiedBounds = null)
+        IReadOnlyList<Rect>? occupiedBounds = null,
+        Rect? placementBounds = null)
     {
+        PlacementStatus = "invalid_bounds";
         if (composerBounds.IsEmpty)
         {
             Hide();
@@ -131,10 +134,29 @@ public partial class OverlayWindow : Window
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(monitor, ref info))
         {
+            PlacementStatus = "monitor_unavailable";
             Hide();
             return;
         }
-        var scale = GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0 ? dpiX / 96d : 1d;
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+        if (MonitorFromWindow(handle, 2) != monitor)
+        {
+            // Move the hidden HWND first so WPF receives the target monitor's DPI change.
+            Hide();
+            if (!SetWindowPos(handle, nint.Zero, center.X, center.Y, 0, 0, 0x0015))
+            {
+                PlacementStatus = "window_position_failed";
+                return;
+            }
+        }
+        var dpi = GetDpiForWindow(handle);
+        if (dpi == 0)
+        {
+            PlacementStatus = "monitor_unavailable";
+            Hide();
+            return;
+        }
+        var scale = dpi / 96d;
         var screen = new Rect(info.Work.Left, info.Work.Top,
             info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top);
         var obstacles = (occupiedBounds ?? Array.Empty<Rect>()).ToList();
@@ -142,18 +164,19 @@ public partial class OverlayWindow : Window
             obstacles.Add(control);
         // Without a separately identified editor the entire composer is protected.
         var placement = OverlayPlacement.Find(composerBounds, editorBounds ?? composerBounds,
-            obstacles, screen, scale, rightControlBounds);
+            obstacles, screen, scale, rightControlBounds, placementBounds);
         if (placement is not { } bounds)
         {
+            PlacementStatus = "no_safe_space";
             Hide();
             return;
         }
         ApplyAdaptiveTheme(composerBounds);
-        var handle = new WindowInteropHelper(this).EnsureHandle();
         // Screen coordinates stay physical; WPF DIP conversion cannot use another monitor's origin.
         if (!SetWindowPos(handle, new nint(-1), (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
             (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x0010))
         {
+            PlacementStatus = "window_position_failed";
             Hide();
             return;
         }
@@ -162,6 +185,7 @@ public partial class OverlayWindow : Window
         if (!SetWindowPos(handle, new nint(-1), (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
             (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x0010))
         {
+            PlacementStatus = "window_position_failed";
             Hide();
             return;
         }
@@ -170,6 +194,7 @@ public partial class OverlayWindow : Window
             StatusPopup.HorizontalOffset += 1;
             StatusPopup.HorizontalOffset -= 1;
         }
+        PlacementStatus = "placed";
     }
 
     private void ApplyAdaptiveTheme(Rect composerBounds)
@@ -333,8 +358,11 @@ public partial class OverlayWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
 
-    [DllImport("shcore.dll")]
-    private static extern int GetDpiForMonitor(nint monitor, int type, out uint dpiX, out uint dpiY);
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint window);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

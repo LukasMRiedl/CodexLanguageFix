@@ -27,7 +27,7 @@ public sealed class CorrectionCoordinator : IDisposable
     private string? _transientMessage;
     private DateTimeOffset _transientUntil;
     private string? _lastCaptureDiagnostic;
-    private bool? _lastPlacementVisible;
+    private string? _lastPlacementDiagnostic;
 
     public CorrectionCoordinator(
         IComposerAccessor composerAccessor,
@@ -100,6 +100,10 @@ public sealed class CorrectionCoordinator : IDisposable
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
             LogCaptureStatus();
+            var hiddenDiagnostic = snapshot is null ? "unavailable" : $"{snapshot.Host}:{snapshot.FieldCategory}:empty_field";
+            if (_lastPlacementDiagnostic != hiddenDiagnostic && snapshot is not null)
+                _logger.Write("overlay_empty_field", host: snapshot.Host, fieldCategory: snapshot.FieldCategory, reason: "empty_field");
+            _lastPlacementDiagnostic = hiddenDiagnostic;
             _visibleSnapshot = null;
             _requestCancellation?.Cancel();
             _overlay.Hide();
@@ -359,21 +363,26 @@ public sealed class CorrectionCoordinator : IDisposable
     private void PositionOverlay(ComposerSnapshot snapshot)
     {
         _overlay.PositionAt(snapshot.Bounds, snapshot.RightControlBounds, snapshot.Host,
-            snapshot.EditorBounds, snapshot.OccupiedBounds);
+            snapshot.EditorBounds, snapshot.OccupiedBounds, snapshot.PlacementBounds);
         LogCaptureStatus();
-        if (_lastPlacementVisible != _overlay.IsVisible)
+        var diagnostic = $"{snapshot.Host}:{snapshot.FieldCategory}:{_overlay.PlacementStatus}";
+        if (_lastPlacementDiagnostic != diagnostic)
         {
-            _lastPlacementVisible = _overlay.IsVisible;
-            _logger.Write(_overlay.IsVisible ? "overlay_placed" : "overlay_no_safe_space");
+            _lastPlacementDiagnostic = diagnostic;
+            _logger.Write($"overlay_{_overlay.PlacementStatus}", host: snapshot.Host,
+                fieldCategory: snapshot.FieldCategory, reason: _overlay.PlacementStatus);
         }
     }
 
     private void LogCaptureStatus()
     {
-        if (_composerAccessor is CodexComposerAccessor accessor && _lastCaptureDiagnostic != accessor.LastCaptureStatus)
+        if (_composerAccessor is CodexComposerAccessor accessor)
         {
-            _lastCaptureDiagnostic = accessor.LastCaptureStatus;
-            _logger.Write($"composer_capture_{_lastCaptureDiagnostic}");
+            var diagnostic = $"{accessor.LastCaptureHost}:{accessor.LastFieldCategory}:{accessor.LastCaptureStatus}";
+            if (_lastCaptureDiagnostic == diagnostic) return;
+            _lastCaptureDiagnostic = diagnostic;
+            _logger.Write($"composer_capture_{accessor.LastCaptureStatus}", host: accessor.LastCaptureHost,
+                fieldCategory: accessor.LastFieldCategory, reason: accessor.LastCaptureStatus);
         }
     }
 

@@ -20,6 +20,7 @@ internal sealed class ComposerLayoutCache
     {
         if (_snapshot is not { } previous || dpi == 0 || dpi != _dpi
             || !previous.SameEditor(current) || previous.EditorBounds != current.EditorBounds
+            || previous.FieldCategory != current.FieldCategory
             || !string.Equals(previous.Text, current.Text, StringComparison.Ordinal))
         {
             Clear();
@@ -30,7 +31,8 @@ internal sealed class ComposerLayoutCache
         {
             Bounds = previous.Bounds,
             RightControlBounds = previous.RightControlBounds,
-            OccupiedBounds = previous.OccupiedBounds
+            OccupiedBounds = previous.OccupiedBounds,
+            PlacementBounds = previous.PlacementBounds
         };
     }
 }

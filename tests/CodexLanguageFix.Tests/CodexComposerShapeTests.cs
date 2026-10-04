@@ -200,9 +200,13 @@ public sealed class CodexComposerShapeTests
             ControlType.ComboBox,
             classes,
             ComposerHost.Hermes));
-        Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
+        Assert.True(CodexComposerAccessor.IsComposerShapeForHost(
             ControlType.Edit,
             "ui-prompt-input-editor__input overflow-y-auto",
+            ComposerHost.Hermes));
+        Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
+            ControlType.Edit,
+            "not-ui-prompt-input-editor__input overflow-y-auto",
             ComposerHost.Hermes));
         Assert.False(CodexComposerAccessor.IsComposerShapeForHost(
             ControlType.Edit,

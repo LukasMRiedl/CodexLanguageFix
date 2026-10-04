@@ -17,9 +17,12 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     public string LastWriteStatus { get; private set; } = "not_attempted";
     public ComposerWriteResult? LastWriteResult { get; private set; }
     public string LastCaptureStatus { get; private set; } = "not_attempted";
+    public ComposerHost? LastCaptureHost { get; private set; }
+    public string? LastFieldCategory { get; private set; }
     internal static int NativeInputSize => UnicodeInput.StructSize;
 
     private readonly ComposerLayoutCache _layoutCache = new();
+    private long _layoutTimestamp;
     internal long CaptureCount { get; private set; }
     internal long LayoutCaptureCount { get; private set; }
 
@@ -31,6 +34,8 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     private ComposerSnapshot? CaptureFocusedComposer(bool reuseLayout)
     {
         LastCaptureStatus = "unavailable";
+        LastCaptureHost = null;
+        LastFieldCategory = null;
         try
         {
             var foreground = GetForegroundWindow();
@@ -41,13 +46,14 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 return null;
             }
             CaptureCount++;
+            LastCaptureHost = TryGetComposerHost(processId);
             var focused = AutomationElement.FocusedElement;
             if (focused is not null)
             {
                 var editable = FindEditableAncestor(focused);
                 var focusedHost = editable is null ? null : TryGetComposerHost(editable);
                 if (editable is not null && focusedHost is not null && !IsPasswordField(editable)
-                    && IsComposerShapeForHost(editable, focusedHost.Value))
+                    && IsEligibleField(editable, focusedHost.Value))
                 {
                     return CaptureSnapshot(editable, focusedHost.Value, reuseLayout);
                 }
@@ -121,10 +127,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         AutomationElement? candidate = null;
         foreach (AutomationElement element in focusableElements)
         {
-            if (!IsComposerShapeForHost(element, host.Value)
+            if (!IsEligibleField(element, host.Value)
                 || IsPasswordField(element)
                 || !element.Current.IsEnabled
-                || element.Current.IsOffscreen)
+                || element.Current.IsOffscreen
+                || (!IsComposerShapeForHost(element, host.Value) && !element.Current.HasKeyboardFocus))
             {
                 continue;
             }
@@ -154,7 +161,15 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private ComposerSnapshot? CaptureSnapshot(AutomationElement element, ComposerHost host, bool reuseLayout)
     {
+        LastCaptureHost = host;
+        LastFieldCategory = IsComposerShapeForHost(element, host) ? "chat" : "prose";
         var snapshot = CreateSnapshot(element, host, reuseLayout);
+        if (LastFieldCategory == "chat" && snapshot is not null
+            && NaturalLanguageField.IsAmbiguousComposerHint(host, element.Current.Name, snapshot.Text))
+        {
+            LastCaptureStatus = "ambiguous_placeholder";
+            return null;
+        }
         LastCaptureStatus = snapshot is null ? "editor_unreadable" : "captured";
         return snapshot;
     }
@@ -190,8 +205,9 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 && HasClassToken(classes, "cursor-text")
                 && HasClassToken(classes, "overflow-y-auto"),
             ComposerHost.Hermes => type == ControlType.Edit
-                && HasClassToken(classes, "cursor-text")
-                && HasClassToken(classes, "overflow-y-auto"),
+                && HasClassToken(classes, "overflow-y-auto")
+                && (HasClassToken(classes, "cursor-text")
+                    || HasClassToken(classes, "ui-prompt-input-editor__input")),
             _ => false
         };
     }
@@ -201,6 +217,47 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             element.Current.ControlType,
             element.Current.ClassName,
             host);
+
+    private static bool IsEligibleField(AutomationElement element, ComposerHost host)
+    {
+        if (!element.Current.IsEnabled || element.Current.IsOffscreen || IsPasswordField(element)) return false;
+        if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var value)
+            && ((ValuePattern)value).Current.IsReadOnly) return false;
+        if (element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern)
+            && ((TextPattern)textPattern).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute) is true) return false;
+        if (IsComposerShapeForHost(element, host)) return true;
+        if (host == ComposerHost.Antigravity || element.Current.ControlType != ControlType.Edit) return false;
+        var label = element.Current.LabeledBy?.Current.Name;
+        if (NaturalLanguageField.IsSupported(host, className: element.Current.ClassName,
+            automationId: element.Current.AutomationId, name: element.Current.Name, associatedLabel: label)) return true;
+        // Some host forms render a static caption without an HTML label association.
+        // Accept only an exact known caption immediately above a single-editor group.
+        var bounds = element.Current.BoundingRectangle;
+        var scale = GetDpiForWindow(FindHostWindow(element)) / 96d;
+        if (scale <= 0) return false;
+        var parent = TreeWalker.ControlViewWalker.GetParent(element);
+        for (var depth = 0; depth < 3 && parent is not null; depth++)
+        {
+            if (parent.Current.ControlType == ControlType.Document || parent.Current.ControlType == ControlType.Window) break;
+            var edits = parent.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+            if (edits.Count > 1) break;
+            var captions = FindVisibleControls(parent,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+            foreach (AutomationElement caption in captions)
+            {
+                var captionBounds = caption.Cached.BoundingRectangle;
+                if (captionBounds.IsEmpty || captionBounds.Bottom > bounds.Top
+                    || bounds.Top - captionBounds.Bottom > 24 * scale
+                    || captionBounds.Right <= bounds.Left || captionBounds.Left >= bounds.Right) continue;
+                if (NaturalLanguageField.IsSupported(host, className: element.Current.ClassName,
+                    automationId: element.Current.AutomationId, name: element.Current.Name,
+                    associatedLabel: caption.Current.Name)) return true;
+            }
+            parent = TreeWalker.ControlViewWalker.GetParent(parent);
+        }
+        return false;
+    }
 
     public ComposerSnapshot? TryRefresh(ComposerSnapshot snapshot)
     {
@@ -213,7 +270,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         try
         {
             if (!IsSameRuntimeId(element.GetRuntimeId(), snapshot.RuntimeId)
-                || TryGetComposerHost(element) != snapshot.Host)
+                || TryGetComposerHost(element) != snapshot.Host || !IsEligibleField(element, snapshot.Host))
             {
                 return null;
             }
@@ -271,7 +328,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
             if (!EnsureComposerFocus(element, snapshot.HostWindow))
             {
-                return Failed("focus_changed");
+                return Failed("focus_changed_" + FocusDiagnostic(element, snapshot.HostWindow));
             }
 
             var target = new NativeEditTarget(snapshot, element);
@@ -403,9 +460,13 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
         var hostWindow = FindHostWindow(element);
         var current = new ComposerSnapshot(element, element.GetRuntimeId(), text, editorBounds,
-            element.Current.ProcessId, Host: host, HostWindow: hostWindow, EditorBounds: editorBounds, ReadMethod: readMethod);
+            element.Current.ProcessId, Host: host, HostWindow: hostWindow, EditorBounds: editorBounds, ReadMethod: readMethod,
+            FieldCategory: IsComposerShapeForHost(element, host) ? "chat" : "prose");
         var dpi = hostWindow == 0 ? 0 : GetDpiForWindow(hostWindow);
-        if (reuseLayout && _layoutCache.TryApply(current, dpi) is { } cached)
+        // Nearby controls can move without changing the editor or producing a WinEvent.
+        // Every periodic poll reads their geometry; rapid status-only refreshes may reuse it.
+        if (reuseLayout && Stopwatch.GetElapsedTime(_layoutTimestamp).TotalMilliseconds < 50
+            && _layoutCache.TryApply(current, dpi) is { } cached)
             return cached;
 
         LayoutCaptureCount++;
@@ -414,37 +475,40 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         var layoutResolved = true;
         try
         {
-            surfaceBounds = FindComposerSurfaceBounds(element, editorBounds);
-            toolbar = FindToolbarContext(element, surfaceBounds, host);
-            if (surfaceBounds == editorBounds)
+            if (current.FieldCategory == "chat")
             {
-                var association = FindAdjacentToolbar(element, editorBounds, hostWindow);
-                if (association is not null)
+                surfaceBounds = FindComposerSurfaceBounds(element, editorBounds);
+                toolbar = FindToolbarContext(element, surfaceBounds, host);
+                if (surfaceBounds == editorBounds)
                 {
-                    surfaceBounds = association.SurfaceBounds;
-                    Rect? anchor = null;
-                    foreach (var button in association.RowButtons)
+                    var association = FindAdjacentToolbar(element, editorBounds, hostWindow);
+                    if (association is not null)
                     {
-                        if ((host != ComposerHost.Codex || IsCodexModelAnchor(button))
-                            && IsBetterToolbarAnchor(button, anchor, host))
+                        surfaceBounds = association.SurfaceBounds;
+                        Rect? anchor = null;
+                        foreach (var button in association.RowButtons)
                         {
-                            anchor = button;
+                            if ((host != ComposerHost.Codex || IsCodexModelAnchor(button))
+                                && IsBetterToolbarAnchor(button, anchor, host))
+                            {
+                                anchor = button;
+                            }
                         }
-                    }
 
-                    toolbar = new ToolbarContext(anchor, association.OccupiedBounds);
+                        toolbar = new ToolbarContext(anchor, association.OccupiedBounds);
+                    }
+                    else
+                    {
+                        layoutResolved = false;
+                    }
                 }
-                else
+
+                if (toolbar.OccupiedBounds is null)
                 {
                     layoutResolved = false;
+                    surfaceBounds = editorBounds;
+                    toolbar = new ToolbarContext(null, [editorBounds]);
                 }
-            }
-
-            if (toolbar.OccupiedBounds is null)
-            {
-                layoutResolved = false;
-                surfaceBounds = editorBounds;
-                toolbar = new ToolbarContext(null, [editorBounds]);
             }
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException
@@ -456,15 +520,78 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             toolbar = new ToolbarContext(null, [editorBounds]);
         }
 
+        Rect? placementBounds = null;
+        try
+        {
+            var nearby = CapturePlacementContext(element, editorBounds, hostWindow, dpi);
+            placementBounds = nearby.Bounds;
+            if (nearby.Obstacles is not null)
+                toolbar = toolbar with { OccupiedBounds = (toolbar.OccupiedBounds ?? []).Concat(nearby.Obstacles).Distinct().ToArray() };
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException
+            or ArgumentException or COMException)
+        {
+            layoutResolved = false;
+        }
         var result = current with
         {
             Bounds = surfaceBounds,
             RightControlBounds = toolbar.RightControlBounds,
-            OccupiedBounds = toolbar.OccupiedBounds
+            OccupiedBounds = toolbar.OccupiedBounds,
+            PlacementBounds = placementBounds
         };
-        if (layoutResolved) _layoutCache.Store(result, dpi);
+        if (layoutResolved)
+        {
+            _layoutCache.Store(result, dpi);
+            _layoutTimestamp = Stopwatch.GetTimestamp();
+        }
         else _layoutCache.Clear();
         return result;
+    }
+
+    private static (Rect? Bounds, IReadOnlyList<Rect>? Obstacles) CapturePlacementContext(
+        AutomationElement editor, Rect editorBounds, nint window, uint dpi)
+    {
+        var document = FindDocumentRoot(editor);
+        if (document is null || window == 0 || dpi == 0) return default;
+        var windowRoot = AutomationElement.FromHandle(window);
+        var available = Rect.Intersect(document.Current.BoundingRectangle, windowRoot.Current.BoundingRectangle);
+        var scope = document;
+        var parent = TreeWalker.ControlViewWalker.GetParent(editor);
+        for (var depth = 0; depth < 20 && parent is not null; depth++)
+        {
+            if (IsSameRuntimeId(parent.GetRuntimeId(), document.GetRuntimeId())) break;
+            if (parent.Current.ControlType == ControlType.Window)
+            {
+                available.Intersect(parent.Current.BoundingRectangle);
+                scope = parent;
+                break;
+            }
+            parent = TreeWalker.ControlViewWalker.GetParent(parent);
+        }
+        if (available.IsEmpty || !available.Contains(editorBounds)) return default;
+        var nearby = editorBounds;
+        nearby.Inflate(36 * dpi / 96d, 36 * dpi / 96d);
+        nearby.Intersect(available);
+        var ancestors = GetAncestorRuntimeIds(editor);
+        var obstacles = new List<Rect> { editorBounds };
+        var controls = FindVisibleControls(scope, new OrCondition(
+            new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Image)));
+        foreach (AutomationElement control in controls)
+        {
+            var bounds = control.Cached.BoundingRectangle;
+            if (bounds.IsEmpty || !nearby.IntersectsWith(bounds)
+                || !IsToolbarObstacle(control.Cached.ControlType, control.Cached.ClassName, control.Cached.AutomationId,
+                    ancestors.Contains(string.Join(",", control.GetRuntimeId())))) continue;
+            var visibleText = control.Cached.ControlType == ControlType.Text
+                ? TryGetVisibleTextBounds(control, document) : null;
+            obstacles.AddRange(visibleText ?? [bounds]);
+        }
+        return (available, obstacles);
     }
 
     private static ComposerToolbarAssociation? FindAdjacentToolbar(AutomationElement composer, Rect editor, nint hostWindow)
@@ -824,6 +951,14 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         return IsFocusedElementOrAncestor(element);
     }
 
+    private static string FocusDiagnostic(AutomationElement element, nint hostWindow)
+    {
+        var focused = AutomationElement.FocusedElement;
+        return $"host_{(GetForegroundWindow() == hostWindow ? "same" : "changed")}"
+            + $"_focus_{(IsFocusedElementOrAncestor(element) ? "same" : "changed")}"
+            + $"_type_{focused?.Current.ControlType.Id ?? 0}";
+    }
+
     private sealed class NativeEditTarget(ComposerSnapshot snapshot, AutomationElement element)
         : IComposerEditTarget
     {
@@ -954,7 +1089,8 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
             var readback = ComposerWriteVerification.WaitForExact(after, Read, () => IsCurrentEditor);
             if (readback != ComposerWriteCheck.Exact)
-                return Fail(readback == ComposerWriteCheck.EditorChanged ? "readback_editor_changed" : "readback_mismatch");
+                return Fail(readback == ComposerWriteCheck.EditorChanged
+                    ? "readback_editor_changed_" + FocusDiagnostic(element, snapshot.HostWindow) : "readback_mismatch");
             if (!_failed) LastStatus = "ok";
             return true;
         }

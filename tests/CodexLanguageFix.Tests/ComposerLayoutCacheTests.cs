@@ -9,7 +9,7 @@ public sealed class ComposerLayoutCacheTests
     private static ComposerSnapshot Snapshot() => new(new object(), [1, 2], "Text",
         new Rect(0, 0, 300, 160), 42, new Rect(200, 120, 60, 30),
         HostWindow: 123, EditorBounds: new Rect(0, 0, 300, 100),
-        OccupiedBounds: [new Rect(0, 0, 300, 100)]);
+        OccupiedBounds: [new Rect(0, 0, 300, 100)], PlacementBounds: new Rect(-100, -100, 800, 600));
 
     [Fact]
     public void ReusesOnlyGeometryAndKeepsFreshNativeElement()
@@ -22,6 +22,7 @@ public sealed class ComposerLayoutCacheTests
         Assert.Same(current.NativeElement, result.NativeElement);
         Assert.Equal(previous.Bounds, result.Bounds);
         Assert.Equal(current.Text, result.Text);
+        Assert.Equal(previous.PlacementBounds, result.PlacementBounds);
     }
 
     [Fact]
@@ -36,6 +37,7 @@ public sealed class ComposerLayoutCacheTests
             previous with { HostWindow = 124 },
             previous with { Host = ComposerHost.Antigravity },
             previous with { Text = "Text\n" },
+            previous with { FieldCategory = "prose" },
             previous with { EditorBounds = new Rect(-100, 0, 300, 100) }
         };
         foreach (var current in changed)

@@ -30,7 +30,9 @@ public sealed record ComposerSnapshot(
     nint HostWindow = default,
     Rect? EditorBounds = null,
     IReadOnlyList<Rect>? OccupiedBounds = null,
-    ComposerReadMethod ReadMethod = ComposerReadMethod.Unknown)
+    ComposerReadMethod ReadMethod = ComposerReadMethod.Unknown,
+    Rect? PlacementBounds = null,
+    string FieldCategory = "chat")
 {
     public bool SameEditor(ComposerSnapshot? other) => other is not null
         && Host == other.Host && ProcessId == other.ProcessId && HostWindow == other.HostWindow

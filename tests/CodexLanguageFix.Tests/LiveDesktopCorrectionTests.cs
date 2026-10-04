@@ -38,6 +38,55 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         .ToArray();
 
     [Fact]
+    public void PreparedSyntheticCodexParagraph_MonitorTransitionRoundTrips()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_MONITOR_TRANSITION_TEST") != "1") return;
+        using var dpiScope = new LiveDpiScope();
+        var accessor = new CodexComposerAccessor();
+        var (original, _) = CapturePreparedFixture(accessor, ParagraphFixtures, ComposerHost.Codex);
+        Assert.True(GetWindowRect(original.HostWindow, out var previous));
+        // Optional, explicitly observed pre-test geometry for restoring this local test session.
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_RESTORE_WINDOW_RECT") is { } restoreRect)
+        {
+            var parts = restoreRect.Split(',').Select(int.Parse).ToArray();
+            Assert.Equal(4, parts.Length);
+            Assert.True(parts[2] > parts[0] && parts[3] > parts[1]);
+            previous = new NativeRect { Left = parts[0], Top = parts[1], Right = parts[2], Bottom = parts[3] };
+        }
+        var primary = new NativeMonitorInfo { Size = Marshal.SizeOf<NativeMonitorInfo>() };
+        Assert.True(GetMonitorInfo(MonitorFromPoint(new NativePoint(), 2), ref primary));
+        try
+        {
+            Assert.True(SetWindowPos(original.HostWindow, nint.Zero,
+                primary.Work.Left + 40, primary.Work.Top + 40,
+                Math.Min(previous.Right - previous.Left, primary.Work.Right - primary.Work.Left - 80),
+                Math.Min(previous.Bottom - previous.Top, primary.Work.Bottom - primary.Work.Top - 80), 0x0014));
+            Thread.Sleep(1200);
+            Assert.Equal(192u, GetDpiForWindow(original.HostWindow));
+            ((AutomationElement)original.NativeElement!).SetFocus();
+            Thread.Sleep(800);
+            output.WriteLine("monitor_transition: host_dpi=192; target=primary");
+            RunOverlayRoundTrip(ParagraphFixtures, ComposerHost.Codex);
+        }
+        finally
+        {
+            Assert.True(SetWindowPos(original.HostWindow, nint.Zero, previous.Left, previous.Top,
+                previous.Right - previous.Left, previous.Bottom - previous.Top, 0x0014));
+            // Chromium applies its WM_DPICHANGED suggestion asynchronously. Restore the
+            // original physical size once more after that transition has settled.
+            Thread.Sleep(1200);
+            Assert.True(SetWindowPos(original.HostWindow, nint.Zero, previous.Left, previous.Top,
+                previous.Right - previous.Left, previous.Bottom - previous.Top, 0x0014));
+        }
+        Thread.Sleep(1200);
+        Assert.Equal(168u, GetDpiForWindow(original.HostWindow));
+        ((AutomationElement)original.NativeElement!).SetFocus();
+        Thread.Sleep(800);
+        output.WriteLine("monitor_transition: host_dpi=168; target=restored");
+        RunOverlayRoundTrip(ParagraphFixtures, ComposerHost.Codex);
+    }
+
+    [Fact]
     public void PreparedSyntheticMultipleErrors_TenFirstAttemptRoundTrips()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_FIRST_ATTEMPT_STRESS_TEST") != "1") return;
@@ -190,6 +239,13 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Hermes);
     }
 
+    [Fact]
+    public void PreparedSyntheticHermesParagraphList_IsCorrectedAndUndoneThroughOwnOverlay()
+    {
+        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_PARAGRAPH_LIVE_TEST") != "1") return;
+        RunOverlayRoundTrip(ParagraphFixtures, ComposerHost.Hermes);
+    }
+
     // Read-only discovery: CODEX_LANGUAGE_FIX_DESKTOP_FIXTURE_PROBE=1. Never authorizes a write or new fixture variant.
     [Fact]
     public void PreparedSyntheticParagraphList_ReadOnlyReportsVerifiedFixtureEncoding()
@@ -226,6 +282,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
 
     private void RunOverlayRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
     {
+        using var dpiScope = new LiveDpiScope();
         var accessor = new CodexComposerAccessor();
         var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost);
         var originalText = original.Text;
@@ -243,6 +300,21 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
             var correct = WaitForButton(app, localizer.Get(AppText.CorrectAutomationName));
             AssertCurrentText(originalText);
             var correctWindow = OwnButtonWindow(app, correct);
+            Assert.True(LiveDpiScope.IsPerMonitorV2(correctWindow), "Das installierte Overlay muss PerMonitorV2 verwenden.");
+            var buttonBounds = correct.Current.BoundingRectangle;
+            var scale = GetDpiForWindow(correctWindow) / 96d;
+            Assert.InRange(buttonBounds.Width, 28 * scale - 1, 28 * scale + 1);
+            Assert.InRange(buttonBounds.Height, 28 * scale - 1, 28 * scale + 1);
+            Assert.True(original.PlacementBounds?.Contains(buttonBounds) == true,
+                "Der tatsächliche Knopf muss innerhalb des geprüften Appfensters liegen.");
+            foreach (var obstacle in (original.OccupiedBounds ?? []).Append(original.EditorBounds!.Value))
+            {
+                var protectedBounds = obstacle;
+                protectedBounds.Inflate(4 * scale - 1, 4 * scale - 1);
+                Assert.False(protectedBounds.IntersectsWith(buttonBounds),
+                    "Der tatsächliche Knopf muss Abstand zu Text und Bedienelementen halten.");
+            }
+            output.WriteLine(JsonSerializer.Serialize(new { buttonBounds, scale, perMonitorV2 = true }));
             ReportActivationState(app, correctWindow, original.HostWindow, "correct_before_click");
             ClickOwnButton(app, correct, original.HostWindow, () => AssertCurrentText(originalText));
             ReportActivationState(app, correctWindow, original.HostWindow, "correct_after_click");
@@ -324,6 +396,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
 
     private void RunNativeRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
     {
+        using var dpiScope = new LiveDpiScope();
         var accessor = new CodexComposerAccessor();
         var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost);
         var originalText = original.Text;
@@ -505,6 +578,9 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     private static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint window);
+
+    [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint window, out int processId);
 
     [DllImport("user32.dll")]
@@ -526,6 +602,28 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(nint window, out NativeRect bounds);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(NativePoint point, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitor, ref NativeMonitorInfo info);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y,
+        int width, int height, uint flags);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MouseInputEvent

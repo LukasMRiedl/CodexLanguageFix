@@ -150,16 +150,16 @@ public sealed class ComposerToolbarGeometryTests
     [Fact]
     public void VisibleTextLinesPreserveRealObstaclesWithoutBlockingWhitespaceInsideAggregateBox()
     {
-        var surface = new Rect(842, 1504, 778, 168);
+        var surface = new Rect(842, 1504, 778, 186);
         var editor = new Rect(858, 1512, 746, 88);
-        var document = new Rect(240, 32, 2400, 1640);
+        var document = new Rect(240, 32, 2400, 1658);
         Rect[] buttons = [new(850, 1608, 56, 56), new(916, 1608, 60, 56), new(1160, 1608, 324, 56),
             new(1484, 1608, 56, 56), new(1556, 1608, 56, 56)];
         Rect[] aggregate = [new(864, 1299, 732, 311), new(864, 1646, 734, 40)];
         Assert.Null(OverlayPlacement.Find(surface, editor, buttons.Concat(aggregate).ToArray(), document, 2, buttons[2]));
 
         // Synthetische sichtbare Zeilen belegen die Wirkung der präziseren UIA-Geometrie.
-        Rect[] visibleLines = [new(864, 1299, 732, 200), new(864, 1668, 734, 18)];
+        Rect[] visibleLines = [new(864, 1299, 732, 200), new(864, 1672, 734, 18)];
         var placement = Assert.IsType<Rect>(OverlayPlacement.Find(surface, editor, buttons.Concat(visibleLines).ToArray(), document, 2, buttons[2]));
         Assert.DoesNotContain(visibleLines, line => line.IntersectsWith(placement));
         Assert.InRange(placement.Left, 976, 1104);

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using CodexLanguageFix.Core;
+using CodexLanguageFix.Contracts;
 
 namespace CodexLanguageFix.Infrastructure;
 
@@ -22,7 +23,10 @@ public sealed class DiagnosticLogger
         int? matchCount = null,
         int? statusCode = null,
         double? elapsedMilliseconds = null,
-        CorrectionProviderKind? provider = null)
+        CorrectionProviderKind? provider = null,
+        ComposerHost? host = null,
+        string? fieldCategory = null,
+        string? reason = null)
     {
         var entry = new
         {
@@ -32,7 +36,10 @@ public sealed class DiagnosticLogger
             characterCount,
             matchCount,
             statusCode,
-            elapsedMilliseconds
+            elapsedMilliseconds,
+            host = host?.ToString(),
+            fieldCategory,
+            reason
         };
 
         var line = JsonSerializer.Serialize(entry) + Environment.NewLine;
