@@ -9,6 +9,8 @@ namespace CodexLanguageFix;
 
 public partial class App : System.Windows.Application
 {
+    private DiagnosticLogger? _logger;
+    private string _exitReason = "runtime_exit";
     private Mutex? _singleInstanceMutex;
     private LanguageToolClient? _languageToolClient;
     private CodexAppServerClient? _codexAppServerClient;
@@ -18,25 +20,30 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        var settingsService = new SettingsService();
+        var logger = new DiagnosticLogger(settingsService.ApplicationDirectory);
+        _logger = logger;
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         base.OnStartup(e);
         _singleInstanceMutex = new Mutex(true, @"Local\CodexLanguageFix.SingleInstance", out var ownsMutex);
         if (!ownsMutex)
         {
+            _exitReason = "existing_instance";
             Shutdown();
             return;
         }
 
-        var settingsService = new SettingsService();
         var settings = settingsService.Load();
         var localizer = new AppLocalizer(settings.Language);
         var autostartService = new AutostartService(localizer);
-        var logger = new DiagnosticLogger(settingsService.ApplicationDirectory);
 
         if (!settings.FirstRunNoticeShown)
         {
             var notice = new FirstRunWindow(localizer);
             if (notice.ShowDialog() != true)
             {
+                _exitReason = "notice_declined";
                 Shutdown();
                 return;
             }
@@ -80,7 +87,11 @@ public partial class App : System.Windows.Application
             logger,
             Dispatcher,
             localizer);
-        _tray.ExitRequested += (_, _) => Shutdown();
+        _tray.ExitRequested += (_, _) =>
+        {
+            _exitReason = "tray_exit";
+            Shutdown();
+        };
         _coordinator.Start();
         logger.Write("application_started");
     }
@@ -105,6 +116,29 @@ public partial class App : System.Windows.Application
             _singleInstanceMutex.Dispose();
         }
         base.OnExit(e);
+        _logger?.Write("application_exit", statusCode: e.ApplicationExitCode, reason: _exitReason);
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+    }
+
+    private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        _exitReason = "dispatcher_failure";
+        _logger?.WriteFailure("application_dispatcher_failure", e.Exception);
+    }
+
+    private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        _exitReason = "runtime_failure";
+        if (e.ExceptionObject is Exception exception)
+            _logger?.WriteFailure("application_runtime_failure", exception);
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _exitReason = "session_ending";
+        _logger?.Write("application_session_ending", reason: e.ReasonSessionEnding.ToString());
+        base.OnSessionEnding(e);
     }
 
     private static async Task WarmUpLunaAsync(CodexAppServerClient client, DiagnosticLogger logger)

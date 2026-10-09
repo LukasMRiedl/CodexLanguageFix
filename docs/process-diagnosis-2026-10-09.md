@@ -1,0 +1,9 @@
+# Prozessdiagnose vom 9. Oktober 2026
+
+Bei Beginn der Prüfung lief kein CodexLanguageFix-Prozess. Die installierte Version 1.4.0 und der freigegebene HKCU-Autostarteintrag waren vorhanden. Das Protokoll zeigte erfolgreiche Korrekturen und Platzierungen am selben Tag und endete um 16:12:46 Uhr. In den geprüften Windows-Anwendungs-, Zuverlässigkeits- und Ressourcenprotokollen der letzten fünf Tage fand sich kein aktueller zugehöriger Absturzbericht. Das beweist keine bestimmte Beendigungsursache.
+
+Ein Neustart derselben Installation gelang, Luna wurde erfolgreich initialisiert und der Prozess blieb während der Prüfung aktiv. Die Ursache der vorherigen Beendigung konnte nicht reproduziert werden. Ein dauerhafter Fehlerfix ist deshalb nicht nachgewiesen.
+
+Version 1.4.1 schließt die konkrete Diagnoselücke: `application_exit` protokolliert den Exitcode sowie `tray_exit`, `session_ending`, `existing_instance`, `notice_declined` oder `runtime_exit`. `application_session_ending` erfasst den Windows-Sitzungswechsel. `application_dispatcher_failure` und `application_runtime_failure` erfassen unbehandelte Ausnahmen mit Typ und HResult. Die Fehlerweitergabe bleibt unverändert. Fehlermeldungen, Stacktraces und Nutzertexte werden nicht aufgezeichnet. Ein hartes externes Beenden kann weiterhin keinen Exit-Eintrag erzeugen; sein Auslöser lässt sich aus dessen Fehlen nicht ableiten.
+
+Prüfung: 580 Offline-Tests bestanden, darunter Datenschutz und gesperrte Protokolldatei. Der schreibgeschützte Codex-Feldtest bestand. Die installierte Datei entsprach per SHA-256 dem Release-Build. Ein echter Zweitinstanzstart endete mit Exitcode 0 und `application_exit`/`existing_instance`, während die ursprüngliche Instanz aktiv blieb. Vor der Installation wurde die eindeutig identifizierte Version 1.4.0 gesichert. Bestehende Entwürfe wurden nicht verändert und keine Nachrichten abgesendet.

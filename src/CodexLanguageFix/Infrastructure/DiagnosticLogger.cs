@@ -61,6 +61,11 @@ public sealed class DiagnosticLogger
         }
     }
 
+    public void WriteFailure(string eventName, Exception exception)
+    {
+        Write(eventName, statusCode: exception.HResult, reason: exception.GetType().FullName);
+    }
+
     private void RemoveExpiredLogs()
     {
         foreach (var file in Directory.EnumerateFiles(_logDirectory, "diagnostic-*.jsonl"))
