@@ -77,6 +77,14 @@ Die selbstenthaltende Einzeldatei liegt anschließend unter:
 
 `src\CodexLanguageFix\bin\Release\net8.0-windows\win-x64\publish\CodexLanguageFix.exe`
 
+Nach einer Installation aus einem Agenten- oder IDE-Terminal die beendete Desktop-App über Explorer starten, damit sie nicht an die Prozesslebensdauer des Terminals gebunden bleibt:
+
+```powershell
+.\scripts\start-independent.ps1 -ExecutablePath "C:\Pfad\zu\CodexLanguageFix.exe"
+```
+
+Das Skript prüft Explorer als übergeordneten Prozess. Der optionale Integrationstest `scripts/test-independent-start.ps1` nimmt denselben Pfad entgegen und prüft, dass die App das Schließen eines eigenen Windows-Jobs überlebt, während ein normal gestarteter Kontrollprozess beendet wird. Er lässt die App anschließend laufen. Einzelheiten stehen in der [Prozessdiagnose](docs/process-lifetime-2026-10-10.md).
+
 ## Unterstützte Anwendungen
 
 - OpenAI Codex Desktop für Windows

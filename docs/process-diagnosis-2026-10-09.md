@@ -1,5 +1,7 @@
 # Prozessdiagnose vom 9. Oktober 2026
 
+Nachtrag: Der [am 10. Oktober nachgewiesene Startfehler](process-lifetime-2026-10-10.md) bindet aus dem Agententerminal gestartete Apps an dessen Windows-Job. Das reparierte Startverfahren wurde mit einem kontrollierten Job-Ende geprüft.
+
 Bei Beginn der Prüfung lief kein CodexLanguageFix-Prozess. Die installierte Version 1.4.0 und der freigegebene HKCU-Autostarteintrag waren vorhanden. Das Protokoll zeigte erfolgreiche Korrekturen und Platzierungen am selben Tag und endete um 16:12:46 Uhr. In den geprüften Windows-Anwendungs-, Zuverlässigkeits- und Ressourcenprotokollen der letzten fünf Tage fand sich kein aktueller zugehöriger Absturzbericht. Das beweist keine bestimmte Beendigungsursache.
 
 Ein Neustart derselben Installation gelang, Luna wurde erfolgreich initialisiert und der Prozess blieb während der Prüfung aktiv. Die Ursache der vorherigen Beendigung konnte nicht reproduziert werden. Ein dauerhafter Fehlerfix ist deshalb nicht nachgewiesen.
