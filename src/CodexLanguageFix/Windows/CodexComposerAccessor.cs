@@ -19,6 +19,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     public string LastCaptureStatus { get; private set; } = "not_attempted";
     public ComposerHost? LastCaptureHost { get; private set; }
     public string? LastFieldCategory { get; private set; }
+    internal bool LastCaptureWasKeyboardFocused { get; private set; }
     internal static int NativeInputSize => UnicodeInput.StructSize;
 
     private readonly ComposerLayoutCache _layoutCache = new();
@@ -30,12 +31,14 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     public ComposerSnapshot? TryCaptureFocusedComposer() => CaptureFocusedComposer(false);
     public ComposerSnapshot? TryPollFocusedComposer() => CaptureFocusedComposer(true);
+    internal ComposerSnapshot? TryCaptureKeyboardFocusedComposer() => CaptureFocusedComposer(false, true);
 
-    private ComposerSnapshot? CaptureFocusedComposer(bool reuseLayout)
+    private ComposerSnapshot? CaptureFocusedComposer(bool reuseLayout, bool requireKeyboardFocus = false)
     {
         LastCaptureStatus = "unavailable";
         LastCaptureHost = null;
         LastFieldCategory = null;
+        LastCaptureWasKeyboardFocused = false;
         try
         {
             var foreground = GetForegroundWindow();
@@ -55,6 +58,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 if (editable is not null && focusedHost is not null && !IsPasswordField(editable)
                     && IsEligibleField(editable, focusedHost.Value))
                 {
+                    LastCaptureWasKeyboardFocused = processId != Environment.ProcessId;
                     return CaptureSnapshot(editable, focusedHost.Value, reuseLayout);
                 }
                 // A focused search, rename field or terminal must not redirect to a different composer.
@@ -65,6 +69,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 }
             }
 
+            if (requireKeyboardFocus)
+            {
+                LastCaptureStatus = "no_keyboard_focused_composer";
+                return null;
+            }
             return TryCaptureActiveWindowComposer(focused, reuseLayout);
         }
         catch (ElementNotAvailableException)

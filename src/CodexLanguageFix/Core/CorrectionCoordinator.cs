@@ -16,6 +16,8 @@ public sealed class CorrectionCoordinator : IDisposable
     private readonly TrayController _tray;
     private readonly DiagnosticLogger _logger;
     private readonly CodexFocusWatcher _focusWatcher;
+    private readonly CorrectionHotkey _hotkey;
+    private bool _shortcutFailureReported;
     private readonly DispatcherTimer _fallbackTimer;
     private readonly AppLocalizer _localizer;
     private CancellationTokenSource? _requestCancellation;
@@ -46,6 +48,8 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray = tray;
         _logger = logger;
         _localizer = localizer;
+        _hotkey = new CorrectionHotkey();
+        _hotkey.CorrectRequested += async (_, _) => await CorrectAsync(fromShortcut: true);
         _focusWatcher = new CodexFocusWatcher(dispatcher);
         _focusWatcher.Changed += FocusWatcher_OnChanged;
         _fallbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(750), DispatcherPriority.Background, (_, _) => RefreshOverlay(), dispatcher);
@@ -80,6 +84,7 @@ public sealed class CorrectionCoordinator : IDisposable
         catch (Exception)
         {
             _visibleSnapshot = null;
+            _hotkey.SetEnabled(false);
             _overlay.Hide();
             _logger.Write("overlay_refresh_failed");
         }
@@ -92,6 +97,7 @@ public sealed class CorrectionCoordinator : IDisposable
             _composerAccessor.InvalidateLayout();
             _requestCancellation?.Cancel();
             _visibleSnapshot = null;
+            _hotkey.SetEnabled(false);
             _overlay.Hide();
             return;
         }
@@ -105,6 +111,7 @@ public sealed class CorrectionCoordinator : IDisposable
                 _logger.Write("overlay_empty_field", host: snapshot.Host, fieldCategory: snapshot.FieldCategory, reason: "empty_field");
             _lastPlacementDiagnostic = hiddenDiagnostic;
             _visibleSnapshot = null;
+            _hotkey.SetEnabled(false);
             _requestCancellation?.Cancel();
             _overlay.Hide();
             return;
@@ -115,6 +122,14 @@ public sealed class CorrectionCoordinator : IDisposable
         if (_visibleSnapshot is not null && !_visibleSnapshot.SameEditor(snapshot))
             _transientMessage = null;
         _visibleSnapshot = snapshot;
+        var shortcutEligible = _composerAccessor is CodexComposerAccessor { LastCaptureWasKeyboardFocused: true };
+        if (!_hotkey.SetEnabled(shortcutEligible) && !_shortcutFailureReported)
+        {
+            _shortcutFailureReported = true;
+            _logger.Write("shortcut_registration_failed");
+            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable),
+                _localizer.Get(AppText.ShortcutUnavailable), System.Windows.Forms.ToolTipIcon.Warning);
+        }
         var canUndo = _undo is not null
             && _undo.Snapshot.SameEditor(snapshot)
             && string.Equals(snapshot.Text, _undo.Corrected, StringComparison.Ordinal);
@@ -125,17 +140,24 @@ public sealed class CorrectionCoordinator : IDisposable
         PositionOverlay(snapshot);
     }
 
-    private async Task CorrectAsync()
+    private async Task CorrectAsync(bool fromShortcut = false)
     {
-        if (_busy || _disposed)
+        if (_busy || _disposed || !_tray.Enabled)
         {
             return;
         }
 
-        var snapshot = _composerAccessor.TryCaptureFocusedComposer();
+        var snapshot = fromShortcut && _composerAccessor is CodexComposerAccessor keyboardAccessor
+            ? keyboardAccessor.TryCaptureKeyboardFocusedComposer()
+            : _composerAccessor.TryCaptureFocusedComposer();
         LogCaptureStatus();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
+            if (fromShortcut)
+            {
+                _hotkey.SetEnabled(false);
+                return;
+            }
             ShowTransient(_localizer.Get(AppText.NoPromptDetected));
             return;
         }
@@ -413,6 +435,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _fallbackTimer.Stop();
         _focusWatcher.Changed -= FocusWatcher_OnChanged;
         _focusWatcher.Dispose();
+        _hotkey.Dispose();
         _composerAccessor.InvalidateLayout();
         _visibleSnapshot = null;
         _requestSnapshot = null;

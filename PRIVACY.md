@@ -1,6 +1,6 @@
 # Privacy
 
-Codex Language Fix processes text only after you explicitly click the `Aa` button.
+Codex Language Fix processes text only after you explicitly click the `Aa` button or press `AltGr+,` (`Ctrl+Alt+,` on a German layout) while the app is active and a non-empty supported prompt is recognized.
 
 ## Data transmitted
 
@@ -11,7 +11,7 @@ The current prompt is sent only to the provider selected in the system tray:
 
 ## Data not transmitted
 
-- No prompt is transmitted and no correction or local draft starts unless you click the correction button.
+- No prompt is transmitted and no correction or local draft starts unless you click the correction button or press the shortcut while the app is active and a non-empty supported prompt is recognized. Nothing is sent automatically.
 - Luna may warm the App Server and one empty thread without transmitting composer content.
 - The clipboard is never read or modified.
 - During insertion, the original and verified changes are held in memory for safe rollback. No original-text recovery window opens. These texts are not written to logs or recovery files.
