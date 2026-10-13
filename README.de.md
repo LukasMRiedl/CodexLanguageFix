@@ -6,7 +6,9 @@ Eine eigenständige Windows-App für die Ein-Klick-Korrektur von Prompts in der 
 
 > Dieses Projekt ist unabhängig und nicht mit OpenAI, Google oder LanguageTool verbunden.
 
-Der aktuelle Quellstand ist **Version 1.4.2**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Version 1.4.0 ist als stabiler GitHub-Release verfügbar.
+Der aktuelle Quellstand ist **Version 1.5.0**. Er wählt das neueste Luna-Modell aus dem Katalog der installierten Codex-Laufzeit, das die niedrige Denkstufe mit Fast Mode (`priority`) unterstützt. Das Produktionsprofil `low` bestand mit `gpt-6-luna` die Live-Qualifikation mit 128 Korpusfällen und unveränderten Sicherheitsgattern; Nachweise und Grenzen stehen im [Laufzeitbericht](docs/desktop-runtime-2026-09-30.md). Der frühere Speichervergleich für RC7 ergab rund 49 % weniger privaten Speicher und 43 % weniger Working Set; das angestrebte **80-%-Ziel ist nicht erreicht**. Nachweise und Grenzen stehen im [Speicherbericht](docs/ram-optimization-2026-09-13.md). Version 1.4.0 ist als stabiler GitHub-Release verfügbar.
+
+Version 1.5.0 bestand 30 gepaarte Live-Vergleiche beim sofortigen Shortcut: Die Medianwartezeit sank von 4,53 auf 2,97 Sekunden (34,5 %), bei 60 exakten Korrekturen und besserem Gesamt-p95. Sie ist lokal mit aktivierter optionaler Luna-Vorbereitung installiert. Methode und Grenzen stehen im [Geschwindigkeitsbericht](docs/shortcut-speed-2026-10-13.md).
 
 ## Funktionen
 
@@ -18,21 +20,21 @@ Der aktuelle Quellstand ist **Version 1.4.2**. Er wählt das neueste Luna-Modell
 - Die gesamte Oberfläche ist auf Deutsch und Englisch verfügbar. Standardmäßig folgt sie der Windows-Anzeigesprache und lässt sich jederzeit über das Menü im Infobereich umschalten.
 - Markdown-Codeblöcke, Inline-Code, URLs, E-Mail-Adressen, Pfade, Befehlsoptionen und typische Codebezeichner bleiben unverändert.
 - Die Zwischenablage wird weder gelesen noch verändert.
-- Der Prompt wird nur nach einem Klick auf den `Aa`-Knopf oder per Tastenkürzel übertragen; eine automatische Übertragung gibt es nicht.
+- Standardmäßig wird kein Prompt automatisch übertragen. Wenn du im Infobereich „Luna-Korrekturen vorbereiten“ aktivierst und Luna ausgewählt ist, sendet die App den Prompt nach 1,2 Sekunden beobachteter Textstabilität an Luna, um einen Korrekturentwurf vorzubereiten. Den Entwurf fügst du manuell ein; er wird nicht automatisch eingesetzt. Das kann auf die Nutzungslimits deines verbundenen ChatGPT-Kontos angerechnet werden.
 - Absätze, Leerzeilen, Einrückungen, Listenzeichen, Checkboxen und Markdown-Zeilenumbrüche werden vor dem Einsetzen geprüft. Unsichere Luna-Antworten werden verworfen, schädliche LanguageTool-Einzelkorrekturen ausgelassen.
 - Änderungen werden über exakt geprüfte Textbereiche eingesetzt, ohne Tippanimation oder erneute Eingabe des gesamten Felds. Rückgängig ist nur im ursprünglichen Editor mit unverändertem Korrekturergebnis möglich.
 - Der kompakte Knopf erscheint nur auf einer geprüften freien Fläche am eindeutig zugeordneten Composer. Bei unklarer Zuordnung oder Platzmangel wird er ausgeblendet. Die Positionierung berücksichtigt die Skalierung des Zielmonitors und negative Bildschirmkoordinaten.
 - Änderungen am Ausgangstext, Editor- oder Anbieterwechsel sowie Deaktivierung brechen laufende Anfragen ab. Nach unklaren Teilschreibfehlern gibt es keinen blinden Volltextersatz. Eigene verifizierte Änderungen werden nach Möglichkeit sicher zurückgenommen; es öffnet sich kein Wiederherstellungsfenster.
 - Kein Hintergrunddienst und keine automatische Updatefunktion.
 
-Die erweiterte Aa-Felderkennung und Platzierung wird im [Felderdiagnosebericht](docs/aa-coverage-2026-10-04.md) dokumentiert. Hauptchat-Korrektur und exaktes Rückgängig wurden in Codex und Hermes live geprüft, ebenso reale Monitorwechsel zwischen 175 % und 200 %. Version 1.4.0 ist lokal installiert; zusätzliche, nicht erreichbare Feldfamilien werden im Bericht ausdrücklich als ungeprüft ausgewiesen.
+Die erweiterte Aa-Felderkennung und Platzierung wird im [Felderdiagnosebericht](docs/aa-coverage-2026-10-04.md) dokumentiert. Hauptchat-Korrektur und exaktes Rückgängig wurden in Codex und Hermes live geprüft, ebenso reale Monitorwechsel zwischen 175 % und 200 %. Version 1.4.0 war bei jener Prüfung lokal installiert; zusätzliche, nicht erreichbare Feldfamilien werden im Bericht ausdrücklich als ungeprüft ausgewiesen.
 
 ## Installation
 
 1. Lade `CodexLanguageFix-win-x64.zip` aus dem [aktuellen Release](https://github.com/LukasMRiedl/CodexLanguageFix/releases/latest) herunter.
 2. Entpacke die ZIP-Datei in einen dauerhaft verfügbaren Ordner.
 3. Starte `CodexLanguageFix.exe`.
-4. Bestätige beim ersten Start den Hinweis, dass ein Prompt nur nach einem Klick auf den Korrekturknopf oder mit `AltGr+,` (`Ctrl+Alt+,`) an den ausgewählten Anbieter übertragen wird, wenn die App aktiv ist und ein nichtleerer unterstützter Prompt erkannt wird. Es erfolgt keine automatische Übertragung.
+4. Bestätige beim ersten Start den Datenschutzhinweis. Die automatische Luna-Vorbereitung ist standardmäßig ausgeschaltet. Wenn sie aktiviert und Luna ausgewählt ist, wird ein unterstützter Prompt nach 1,2 Sekunden beobachteter Textstabilität automatisch an Luna gesendet. Den fertigen Entwurf fügst du manuell ein.
 
 Die App benötigt keine Administratorrechte. Über das Symbol im Infobereich lassen sich der Korrekturanbieter auswählen, OpenAI verbinden, der ausgewählte Anbieter testen, die App pausieren oder beenden und der automatische Windows-Start ändern.
 
@@ -42,7 +44,9 @@ Die veröffentlichte EXE ist derzeit nicht codesigniert. Windows kann deshalb be
 
 ## Datenschutz
 
-Erst nach einem Klick auf den Korrekturknopf oder mit `AltGr+,` (`Ctrl+Alt+,`) sendet die aktive App den aktuellen, nichtleeren Prompt aus einem unterstützten Eingabefeld an den ausgewählten Anbieter. Eine automatische Übertragung gibt es nicht. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna verwendet ChatGPT-OAuth über den offiziellen Codex App Server; einen API-Schlüssel-Pfad gibt es nicht. Beim Start des App Servers wählt die App das neueste im offiziellen Runtime-Katalog angebotene Luna-Modell, das die niedrige Denkstufe und Fast Mode (`priority`) unterstützt, und verwendet dieses Profil für die Laufzeit weiter. Nach einem Laufzeit- oder Kontokontext-Reset ermittelt sie das Profil neu, sodass Korrekturen keine wiederholte Modelllisten-Abfrage auslösen. Die Produktion fordert `baseline / low / full-v1` an. Jede Korrektur nutzt einen ephemeren Thread mit einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Der App Server und ein leerer Einmal-Thread dürfen ohne Composer-Inhalt vorbereitet werden; während des Tippens startet weder eine Korrektur noch ein lokaler Vorabentwurf. Segment- und Span-Protokolle sowie `medium` bleiben deaktiviert. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
+Bei aktivierter Vorbereitung können auch ungesendete Zwischenstände während einer Schreibpause übertragen werden. Ein Abbruch beim Weiterschreiben kann eine bereits erfolgte Übertragung nicht zurücknehmen.
+
+Die aktive App überträgt den aktuellen, nichtleeren Prompt aus einem unterstützten Eingabefeld an den ausgewählten Anbieter, wenn du den Korrekturknopf anklickst oder `AltGr+,` (`Ctrl+Alt+,`) drückst. Zusätzlich kann im Infobereich „Luna-Korrekturen vorbereiten“ aktiviert werden; standardmäßig ist die Option ausgeschaltet. Ist sie aktiviert und Luna ausgewählt, sendet die App den Prompt nach 1,2 Sekunden beobachteter Textstabilität automatisch an Luna, um einen Korrekturentwurf vorzubereiten. Der Entwurf wird nicht automatisch eingesetzt, sondern muss manuell eingefügt werden. Diese Anfragen können auf die Nutzungslimits des mit Codex verbundenen ChatGPT-Kontos angerechnet werden. LanguageTool-Anfragen gehen per HTTPS an `https://api.languagetool.org/v2/check`. Luna verwendet ChatGPT-OAuth über den offiziellen Codex App Server; einen API-Schlüssel-Pfad gibt es nicht. Beim Start des App Servers wählt die App das neueste im offiziellen Runtime-Katalog angebotene Luna-Modell, das die niedrige Denkstufe und Fast Mode (`priority`) unterstützt, und verwendet dieses Profil für die Laufzeit weiter. Nach einem Laufzeit- oder Kontokontext-Reset ermittelt sie das Profil neu, sodass Korrekturen keine wiederholte Modelllisten-Abfrage auslösen. Die Produktion fordert `baseline / low / full-v1` an. Jede Korrektur nutzt einen ephemeren Thread mit einer schreibgeschützten Sandbox ohne Netzwerk und ausdrücklichem Werkzeugverbot. Der App Server und ein leerer Einmal-Thread dürfen ohne Composer-Inhalt vorbereitet werden. Segment- und Span-Protokolle sowie `medium` bleiben deaktiviert. Technische Abschnitte werden vor der Übertragung an Luna lokal durch zufällige Platzhalter ersetzt und erst nach strenger Validierung wiederhergestellt.
 
 Prompttext, korrigierter Text, Anbieterantworten, OAuth-Tokens, E-Mail-Adressen und Kontodaten werden in Produktionsprotokollen niemals aufgezeichnet. Bis zu 64 bereits validierte Luna-Ergebnisse werden ausschließlich im Arbeitsspeicher zwischengespeichert und beim Beenden verworfen. Lokale Diagnoseprotokolle enthalten ausschließlich technische Metadaten wie Anbieter, Zeitpunkt, Dauer, Statuscode, Zeichen- und Änderungsanzahl und werden nach sieben Tagen entfernt. Die ausdrücklich aktivierte Oberflächendiagnose kann ausschließlich vorab verifizierte künstliche Testdaten ausgeben.
 
@@ -50,7 +54,7 @@ Weitere Einzelheiten stehen in [PRIVACY.md](PRIVACY.md).
 
 ## Anbietergrenzen
 
-LanguageTool wird lokal auf höchstens 20 Anfragen und 75.000 Zeichen pro Minute begrenzt. Beide Anbieter akzeptieren höchstens 20.000 Zeichen pro Korrektur. Die App erzeugt keine Warteschlange und keine Hintergrundkorrekturen. Für Luna gelten außerdem die Grenzen des mit Codex verbundenen ChatGPT-Kontos.
+LanguageTool wird lokal auf höchstens 20 Anfragen und 75.000 Zeichen pro Minute begrenzt. Beide Anbieter akzeptieren höchstens 20.000 Zeichen pro Korrektur. Die App erzeugt keine Warteschlange. Die automatische Luna-Vorbereitung ist optional und standardmäßig ausgeschaltet; ihre Anfragen können auf die Nutzungslimits des mit Codex verbundenen ChatGPT-Kontos angerechnet werden.
 
 ## Bauen und testen
 

@@ -10,6 +10,7 @@ public sealed class TrayController : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _autostartItem;
+    private readonly ToolStripMenuItem _prepareLunaCorrectionsItem;
     private readonly ToolStripMenuItem _connectionItem;
     private readonly ToolStripMenuItem _providerItem;
     private readonly ToolStripMenuItem _languageToolProviderItem;
@@ -76,6 +77,18 @@ public sealed class TrayController : IDisposable
             }
         };
 
+        _prepareLunaCorrectionsItem = new ToolStripMenuItem
+        {
+            Checked = settings.PrepareLunaCorrections,
+            CheckOnClick = true
+        };
+        _prepareLunaCorrectionsItem.CheckedChanged += (_, _) =>
+        {
+            _settings.PrepareLunaCorrections = _prepareLunaCorrectionsItem.Checked;
+            Save();
+            PreparationChanged?.Invoke(this, EventArgs.Empty);
+        };
+
         _connectionItem = new ToolStripMenuItem();
         _connectionItem.Click += (_, _) => ConnectionTestRequested?.Invoke(this, EventArgs.Empty);
         _providerItem = new ToolStripMenuItem();
@@ -103,6 +116,7 @@ public sealed class TrayController : IDisposable
             _autostartItem,
             new ToolStripSeparator(),
             _providerItem,
+            _prepareLunaCorrectionsItem,
             _connectionItem,
             _languageItem,
             new ToolStripSeparator(),
@@ -121,12 +135,15 @@ public sealed class TrayController : IDisposable
     }
 
     public event EventHandler? EnabledChanged;
+    public event EventHandler? PreparationChanged;
     public event EventHandler? ConnectionTestRequested;
     public event EventHandler? ProviderChanged;
     public event EventHandler? ConnectOpenAiRequested;
     public event EventHandler? ExitRequested;
 
     public bool Enabled => _settings.Enabled;
+
+    public bool PrepareLunaCorrections => _settings.PrepareLunaCorrections;
 
     public CorrectionProviderKind CurrentProvider => _settings.CorrectionProvider;
 
@@ -167,6 +184,7 @@ public sealed class TrayController : IDisposable
     {
         _enabledItem.Text = _localizer.Get(AppText.Enabled);
         _autostartItem.Text = _localizer.Get(AppText.StartWithWindows);
+        _prepareLunaCorrectionsItem.Text = _localizer.Get(AppText.PrepareLunaCorrections);
         _connectionItem.Text = _localizer.Get(AppText.TestConnection);
         _providerItem.Text = _localizer.Get(AppText.CorrectionProvider);
         _languageToolProviderItem.Text = _localizer.Get(AppText.ProviderLanguageTool);

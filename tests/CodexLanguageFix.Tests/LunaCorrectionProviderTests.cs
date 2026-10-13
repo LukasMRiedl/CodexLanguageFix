@@ -9,6 +9,45 @@ namespace CodexLanguageFix.Tests;
 public sealed class LunaCorrectionProviderTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RepeatedSentenceLoss_RetriesOnceAndNeverCachesInvalidOutput(bool failsAgain)
+    {
+        const string sentence = " Der Text bleibt erhalten.";
+        var original = "Das ist ein fehler." + string.Concat(Enumerable.Repeat(sentence, 16));
+        var expected = original.Replace("fehler", "Fehler", StringComparison.Ordinal);
+        var truncated = "Das ist ein Fehler." + string.Concat(Enumerable.Repeat(sentence, 15));
+        var calls = 0;
+        var client = new FakeClient(_ => JsonSerializer.Serialize(new
+        {
+            corrected_text = ++calls == 1 || failsAgain ? truncated : expected
+        }));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+        if (failsAgain)
+        {
+            await Assert.ThrowsAsync<LanguageFixException>(() => provider.CorrectAsync(original, CancellationToken.None));
+            Assert.Equal(2, calls);
+            await Assert.ThrowsAsync<LanguageFixException>(() => provider.CorrectAsync(original, CancellationToken.None));
+            Assert.Equal(4, calls);
+        }
+        else
+        {
+            Assert.Equal(expected, (await provider.CorrectAsync(original, CancellationToken.None)).CorrectedText);
+            Assert.True((await provider.CorrectAsync(original, CancellationToken.None)).CacheHit);
+            Assert.Equal(2, calls);
+        }
+    }
+
+    [Fact]
+    public void RepeatedSentenceGuard_AllowsCorrectionOfEveryRepeatedSentence()
+    {
+        Assert.False(RepeatedSentenceGuard.HasReducedUnchangedRepetitions(
+            "Das ist ein fehler. Das ist ein fehler.", "Das ist ein Fehler. Das ist ein Fehler."));
+        Assert.False(RepeatedSentenceGuard.HasReducedUnchangedRepetitions(
+            "Der Text bleibt erhalten. Der Text bleibt erhalten.", "Der Text bleibt erhalten. Der Text bleibt erhalten."));
+    }
+
+    [Theory]
     [InlineData("full", false)]
     [InlineData("segments", false)]
     [InlineData("spans", false)]
@@ -41,9 +80,29 @@ public sealed class LunaCorrectionProviderTests
         Assert.Equal(whitespaceOnly ? 0 : 1, first.ChangeCount);
         Assert.Equal(first.CorrectedText, cached.CorrectedText);
         Assert.Equal(first.ChangeCount, cached.ChangeCount);
+        Assert.False(first.CacheHit);
+        Assert.True(cached.CacheHit);
         Assert.Equal(first.ChangeCount, first.LunaExecution!.ChangeCount);
         Assert.Equal(1, client.RunCount + client.StructuredRunCount);
         Assert.Equal(protocol == "full" ? 1 : 0, client.RunCount);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_CancelledResponseIsNotCached()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = 0;
+        var client = new FakeClient(text =>
+        {
+            if (++calls == 1) cancellation.Cancel();
+            return JsonSerializer.Serialize(new { corrected_text = text.Replace("korekt", "korrekt", StringComparison.Ordinal) });
+        });
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer("de"));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.CorrectAsync("Das ist korekt.", cancellation.Token));
+        var result = await provider.CorrectAsync("Das ist korekt.", CancellationToken.None);
+        Assert.False(result.CacheHit);
+        Assert.Equal(2, calls);
+        Assert.Equal("Das ist korrekt.", result.CorrectedText);
     }
 
     [Fact]

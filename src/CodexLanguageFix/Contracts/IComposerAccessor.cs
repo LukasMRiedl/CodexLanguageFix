@@ -5,6 +5,7 @@ namespace CodexLanguageFix.Contracts;
 public interface IComposerAccessor
 {
     ComposerSnapshot? TryCaptureFocusedComposer();
+    ComposerSnapshot? TryCaptureFocusedComposerWithoutLayout(bool requireKeyboardFocus = false);
     ComposerSnapshot? TryPollFocusedComposer();
     void InvalidateLayout();
     ComposerSnapshot? TryRefresh(ComposerSnapshot snapshot);

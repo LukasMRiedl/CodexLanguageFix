@@ -29,11 +29,19 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     public void InvalidateLayout() => _layoutCache.Clear();
 
-    public ComposerSnapshot? TryCaptureFocusedComposer() => CaptureFocusedComposer(false);
-    public ComposerSnapshot? TryPollFocusedComposer() => CaptureFocusedComposer(true);
-    internal ComposerSnapshot? TryCaptureKeyboardFocusedComposer() => CaptureFocusedComposer(false, true);
+    public ComposerSnapshot? TryCaptureFocusedComposer() =>
+        CaptureFocusedComposer(includeLayout: true);
+    public ComposerSnapshot? TryCaptureFocusedComposerWithoutLayout(bool requireKeyboardFocus = false) =>
+        CaptureFocusedComposer(includeLayout: false, requireKeyboardFocus: requireKeyboardFocus);
+    public ComposerSnapshot? TryPollFocusedComposer() =>
+        CaptureFocusedComposer(includeLayout: true, reuseLayout: true);
+    internal ComposerSnapshot? TryCaptureKeyboardFocusedComposer() =>
+        TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
 
-    private ComposerSnapshot? CaptureFocusedComposer(bool reuseLayout, bool requireKeyboardFocus = false)
+    private ComposerSnapshot? CaptureFocusedComposer(
+        bool includeLayout,
+        bool reuseLayout = false,
+        bool requireKeyboardFocus = false)
     {
         LastCaptureStatus = "unavailable";
         LastCaptureHost = null;
@@ -59,7 +67,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                     && IsEligibleField(editable, focusedHost.Value))
                 {
                     LastCaptureWasKeyboardFocused = processId != Environment.ProcessId;
-                    return CaptureSnapshot(editable, focusedHost.Value, reuseLayout);
+                    return CaptureSnapshot(editable, focusedHost.Value, includeLayout, reuseLayout);
                 }
                 // A focused search, rename field or terminal must not redirect to a different composer.
                 if (editable is not null)
@@ -74,7 +82,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 LastCaptureStatus = "no_keyboard_focused_composer";
                 return null;
             }
-            return TryCaptureActiveWindowComposer(focused, reuseLayout);
+            return TryCaptureActiveWindowComposer(focused, includeLayout, reuseLayout);
         }
         catch (ElementNotAvailableException)
         {
@@ -98,7 +106,10 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         }
     }
 
-    private ComposerSnapshot? TryCaptureActiveWindowComposer(AutomationElement? focused, bool reuseLayout)
+    private ComposerSnapshot? TryCaptureActiveWindowComposer(
+        AutomationElement? focused,
+        bool includeLayout,
+        bool reuseLayout)
     {
         var root = FindDocumentRoot(focused);
         if (root is null)
@@ -165,14 +176,18 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             LastCaptureStatus = "no_matching_editor";
             return null;
         }
-        return CaptureSnapshot(candidate, host.Value, reuseLayout);
+        return CaptureSnapshot(candidate, host.Value, includeLayout, reuseLayout);
     }
 
-    private ComposerSnapshot? CaptureSnapshot(AutomationElement element, ComposerHost host, bool reuseLayout)
+    private ComposerSnapshot? CaptureSnapshot(
+        AutomationElement element,
+        ComposerHost host,
+        bool includeLayout,
+        bool reuseLayout)
     {
         LastCaptureHost = host;
         LastFieldCategory = IsComposerShapeForHost(element, host) ? "chat" : "prose";
-        var snapshot = CreateSnapshot(element, host, reuseLayout);
+        var snapshot = CreateSnapshot(element, host, includeLayout, reuseLayout);
         if (LastFieldCategory == "chat" && snapshot is not null
             && NaturalLanguageField.IsAmbiguousComposerHint(host, element.Current.Name, snapshot.Text))
         {
@@ -284,7 +299,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 return null;
             }
 
-            var refreshed = CreateSnapshot(element, snapshot.Host);
+            var refreshed = CreateSnapshot(element, snapshot.Host, includeLayout: false);
             return snapshot.SameEditor(refreshed) ? refreshed : null;
         }
         catch (ElementNotAvailableException)
@@ -451,7 +466,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private static ComposerHost? TryGetComposerHost(int processId) => ComposerHostProcess.Identify(processId);
 
-    private ComposerSnapshot? CreateSnapshot(AutomationElement element, ComposerHost host, bool reuseLayout = false)
+    private ComposerSnapshot? CreateSnapshot(
+        AutomationElement element,
+        ComposerHost host,
+        bool includeLayout,
+        bool reuseLayout = false)
     {
         var text = ReadText(element, out var readMethod);
         if (text is null)
@@ -471,6 +490,11 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         var current = new ComposerSnapshot(element, element.GetRuntimeId(), text, editorBounds,
             element.Current.ProcessId, Host: host, HostWindow: hostWindow, EditorBounds: editorBounds, ReadMethod: readMethod,
             FieldCategory: IsComposerShapeForHost(element, host) ? "chat" : "prose");
+        if (!includeLayout)
+        {
+            return current;
+        }
+
         var dpi = hostWindow == 0 ? 0 : GetDpiForWindow(hostWindow);
         // Nearby controls can move without changing the editor or producing a WinEvent.
         // Every periodic poll reads their geometry; rapid status-only refreshes may reuse it.

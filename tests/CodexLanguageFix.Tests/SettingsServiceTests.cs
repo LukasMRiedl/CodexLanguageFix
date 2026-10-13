@@ -17,6 +17,7 @@ public sealed class SettingsServiceTests
             var settings = new SettingsService(directory).Load();
 
             Assert.Equal(CorrectionProviderKind.LanguageTool, settings.CorrectionProvider);
+            Assert.False(settings.PrepareLunaCorrections);
         }
         finally
         {
@@ -35,6 +36,25 @@ public sealed class SettingsServiceTests
             var settings = new SettingsService(directory).Load();
 
             Assert.Equal(CorrectionProviderKind.LanguageTool, settings.CorrectionProvider);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void LunaPreparation_IsDisabledByDefaultAndPersistsWhenEnabled()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var service = new SettingsService(directory);
+            Assert.False(service.Load().PrepareLunaCorrections);
+
+            service.Save(new AppSettings { PrepareLunaCorrections = true });
+
+            Assert.True(service.Load().PrepareLunaCorrections);
         }
         finally
         {

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>CodexLanguageFix.SpeedProbe</AssemblyName>
+    <RootNamespace>CodexLanguageFix.SpeedProbe</RootNamespace>
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <ProductionProjectPath Condition="'$(ProductionProjectPath)' == ''">$(MSBuildThisFileDirectory)..\..\src\CodexLanguageFix\CodexLanguageFix.csproj</ProductionProjectPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(ProductionProjectPath)" AdditionalProperties="SelfContained=false;PublishSingleFile=false" />
+  </ItemGroup>
+</Project>

@@ -13,6 +13,7 @@ public sealed record CorrectionProviderResult(
     int? StatusCode,
     TimeSpan Elapsed)
 {
+    public bool CacheHit { get; init; }
     public LunaCorrectionExecution? LunaExecution { get; init; }
 }
 

@@ -20,6 +20,7 @@ public sealed class CorrectionCoordinator : IDisposable
     private bool _shortcutFailureReported;
     private readonly DispatcherTimer _fallbackTimer;
     private readonly AppLocalizer _localizer;
+    private readonly CorrectionPreparation _preparation;
     private CancellationTokenSource? _requestCancellation;
     private ComposerSnapshot? _visibleSnapshot;
     private UndoState? _undo;
@@ -48,6 +49,9 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray = tray;
         _logger = logger;
         _localizer = localizer;
+        _preparation = new CorrectionPreparation(_providers[CorrectionProviderKind.Luna]);
+        _preparation.Diagnostic += (eventName, length, elapsed) =>
+            _logger.Write(eventName, length, elapsedMilliseconds: elapsed.TotalMilliseconds, provider: CorrectionProviderKind.Luna);
         _hotkey = new CorrectionHotkey();
         _hotkey.CorrectRequested += async (_, _) => await CorrectAsync(fromShortcut: true);
         _focusWatcher = new CodexFocusWatcher(dispatcher);
@@ -59,6 +63,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray.ConnectionTestRequested += async (_, _) => await TestConnectionAsync();
         _tray.ConnectOpenAiRequested += async (_, _) => await ConnectOpenAiAsync();
         _tray.ProviderChanged += Tray_OnProviderChanged;
+        _tray.PreparationChanged += Tray_OnPreparationChanged;
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
     }
 
@@ -83,6 +88,7 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         catch (Exception)
         {
+            _preparation.Clear();
             _visibleSnapshot = null;
             _hotkey.SetEnabled(false);
             _overlay.Hide();
@@ -94,6 +100,7 @@ public sealed class CorrectionCoordinator : IDisposable
     {
         if (!_tray.Enabled)
         {
+            _preparation.Clear();
             _composerAccessor.InvalidateLayout();
             _requestCancellation?.Cancel();
             _visibleSnapshot = null;
@@ -105,6 +112,7 @@ public sealed class CorrectionCoordinator : IDisposable
         var snapshot = _composerAccessor.TryPollFocusedComposer();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
+            _preparation.Clear();
             LogCaptureStatus();
             var hiddenDiagnostic = snapshot is null ? "unavailable" : $"{snapshot.Host}:{snapshot.FieldCategory}:empty_field";
             if (_lastPlacementDiagnostic != hiddenDiagnostic && snapshot is not null)
@@ -123,6 +131,9 @@ public sealed class CorrectionCoordinator : IDisposable
             _transientMessage = null;
         _visibleSnapshot = snapshot;
         var shortcutEligible = _composerAccessor is CodexComposerAccessor { LastCaptureWasKeyboardFocused: true };
+        _preparation.Observe(snapshot,
+            shortcutEligible && _tray.PrepareLunaCorrections && _tray.CurrentProvider == CorrectionProviderKind.Luna,
+            allowStart: !_busy);
         if (!_hotkey.SetEnabled(shortcutEligible) && !_shortcutFailureReported)
         {
             _shortcutFailureReported = true;
@@ -136,20 +147,22 @@ public sealed class CorrectionCoordinator : IDisposable
 
         var message = DateTimeOffset.UtcNow < _transientUntil ? _transientMessage : null;
         _overlay.ShowStatus(message ?? (_busy ? _localizer.Get(AppText.Checking)
-            : canUndo ? FormatChangeCount(_undo!.ChangeCount, _undo.Provider, _localizer) : null), canUndo && !_busy);
+            : canUndo ? FormatChangeCount(_undo!.ChangeCount, _undo.Provider, _localizer)
+            : _preparation.IsReady(snapshot) ? _localizer.Get(AppText.CorrectionReady) : null), canUndo && !_busy);
         PositionOverlay(snapshot);
     }
 
     private async Task CorrectAsync(bool fromShortcut = false)
     {
+        var commandStopwatch = Stopwatch.StartNew();
         if (_busy || _disposed || !_tray.Enabled)
         {
             return;
         }
 
-        var snapshot = fromShortcut && _composerAccessor is CodexComposerAccessor keyboardAccessor
-            ? keyboardAccessor.TryCaptureKeyboardFocusedComposer()
-            : _composerAccessor.TryCaptureFocusedComposer();
+        var captureStopwatch = Stopwatch.StartNew();
+        var snapshot = _composerAccessor.TryCaptureFocusedComposerWithoutLayout(fromShortcut);
+        captureStopwatch.Stop();
         LogCaptureStatus();
         if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.Text))
         {
@@ -169,19 +182,38 @@ public sealed class CorrectionCoordinator : IDisposable
         _overlay.ShowStatus(_localizer.Get(AppText.Checking));
         _requestCancellation = new CancellationTokenSource();
         var requestCancellation = _requestCancellation;
+        var requestProvider = GetCurrentProvider();
+        var commandStatus = "failed";
         try
         {
-            var provider = GetCurrentProvider();
+            var provider = requestProvider;
+            _logger.Write("correction_capture_completed", snapshot.Text.Length,
+                elapsedMilliseconds: captureStopwatch.Elapsed.TotalMilliseconds, provider: provider.Kind);
             _logger.Write("check_started", snapshot.Text.Length, provider: provider.Kind);
+            var providerStopwatch = Stopwatch.StartNew();
+            var prepared = _preparation.BeginManual(snapshot);
+            if (provider.Kind == CorrectionProviderKind.Luna && prepared is not null)
+            {
+                var preparationSucceeded = await prepared.WaitAsync(requestCancellation.Token);
+                _logger.Write(preparationSucceeded ? "preparation_adopted" : "preparation_unavailable",
+                    snapshot.Text.Length, provider: provider.Kind);
+            }
             var outcome = await provider.CorrectAsync(snapshot.Text, requestCancellation.Token);
+            providerStopwatch.Stop();
+            _logger.Write("correction_provider_completed", snapshot.Text.Length,
+                elapsedMilliseconds: providerStopwatch.Elapsed.TotalMilliseconds, provider: provider.Kind,
+                reason: outcome.CacheHit ? "cache_hit" : "fresh_result");
             requestCancellation.Token.ThrowIfCancellationRequested();
-            var active = _composerAccessor.TryCaptureFocusedComposer();
+            var verificationStopwatch = Stopwatch.StartNew();
+            var active = _composerAccessor.TryCaptureFocusedComposerWithoutLayout();
             if (active is null || !IsUnchangedEditor(snapshot, active))
                 throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
             _logger.Write("check_completed", snapshot.Text.Length, outcome.ChangeCount, outcome.StatusCode, outcome.Elapsed.TotalMilliseconds, provider.Kind);
 
             if (string.Equals(outcome.CorrectedText, snapshot.Text, StringComparison.Ordinal))
             {
+                commandStatus = "unchanged";
+                commandStopwatch.Stop();
                 ShowTransient(provider.Kind == CorrectionProviderKind.Luna
                     ? _localizer.Get(AppText.NoChangesFoundProvider, ProviderName(provider.Kind))
                     : _localizer.Get(AppText.NoChangesFound), snapshot);
@@ -200,6 +232,10 @@ public sealed class CorrectionCoordinator : IDisposable
                 _logger.Write("composer_changed_before_write", snapshot.Text.Length);
                 throw new LanguageFixException(_localizer.Get(AppText.PromptChanged));
             }
+
+            verificationStopwatch.Stop();
+            _logger.Write("correction_verification_completed", snapshot.Text.Length,
+                elapsedMilliseconds: verificationStopwatch.Elapsed.TotalMilliseconds, provider: provider.Kind);
 
             var composerStopwatch = Stopwatch.StartNew();
             var replaced = _composerAccessor.TryReplace(current, snapshot.Text, outcome.CorrectedText);
@@ -224,6 +260,10 @@ public sealed class CorrectionCoordinator : IDisposable
                 throw new LanguageFixException(_localizer.Get(AppText.WriteRejected));
             }
 
+            commandStatus = "applied";
+            commandStopwatch.Stop();
+            _preparation.Suppress(current with { Text = outcome.CorrectedText });
+
             _logger.Write(
                 "composer_write_completed",
                 snapshot.Text.Length,
@@ -242,17 +282,21 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         catch (OperationCanceledException)
         {
+            commandStopwatch.Stop();
+            commandStatus = "cancelled";
             _logger.Write("check_cancelled", snapshot.Text.Length);
             ShowTransient(_localizer.Get(AppText.CheckCancelled), snapshot);
         }
         catch (LanguageFixException exception)
         {
+            commandStopwatch.Stop();
             _logger.Write("check_failed", snapshot.Text.Length);
             ShowTransient(exception.Message, snapshot);
             if (!_disposed) _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
         }
         catch (Exception exception)
         {
+            commandStopwatch.Stop();
             _logger.Write("unexpected_check_failure", snapshot.Text.Length);
             var message = _localizer.Get(AppText.UnexpectedCorrectionFailure);
             ShowTransient(message, snapshot);
@@ -261,6 +305,9 @@ public sealed class CorrectionCoordinator : IDisposable
         }
         finally
         {
+            _logger.Write("correction_command_completed", snapshot.Text.Length,
+                elapsedMilliseconds: commandStopwatch.Elapsed.TotalMilliseconds, provider: requestProvider.Kind,
+                reason: $"{(fromShortcut ? "shortcut" : "button")}_{commandStatus}");
             requestCancellation.Dispose();
             _requestCancellation = null;
             _busy = false;
@@ -280,7 +327,7 @@ public sealed class CorrectionCoordinator : IDisposable
             return;
         }
 
-        var current = _composerAccessor.TryCaptureFocusedComposer();
+        var current = _composerAccessor.TryCaptureFocusedComposerWithoutLayout();
         if (current is null || !_undo.Snapshot.SameEditor(current)
             || !string.Equals(current.Text, _undo.Corrected, StringComparison.Ordinal))
         {
@@ -290,6 +337,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
         if (_composerAccessor.TryReplace(current, current.Text, _undo.Original))
         {
+            _preparation.Suppress(current with { Text = _undo.Original });
             _logger.Write("composer_undo_completed", current.Text.Length);
             _undo = null;
             ShowTransient(_localizer.Get(AppText.UndoCompleted));
@@ -341,6 +389,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private async void Tray_OnProviderChanged(object? sender, EventArgs e)
     {
+        _preparation.Clear();
         _requestCancellation?.Cancel();
         RefreshOverlay();
         if (_tray.CurrentProvider != CorrectionProviderKind.Luna)
@@ -359,6 +408,12 @@ public sealed class CorrectionCoordinator : IDisposable
         }
     }
 
+    private void Tray_OnPreparationChanged(object? sender, EventArgs e)
+    {
+        _preparation.Clear();
+        RefreshOverlay();
+    }
+
     private ICorrectionProvider GetCurrentProvider()
     {
         if (_providers.TryGetValue(_tray.CurrentProvider, out var provider))
@@ -375,7 +430,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private void ShowTransient(string message, ComposerSnapshot? origin = null)
     {
-        if (_disposed || (origin is not null && !origin.SameEditor(_composerAccessor.TryCaptureFocusedComposer())))
+        if (_disposed || (origin is not null && !origin.SameEditor(_composerAccessor.TryCaptureFocusedComposerWithoutLayout())))
             return;
         _transientMessage = message;
         _transientUntil = DateTimeOffset.UtcNow.AddSeconds(6);
@@ -431,6 +486,7 @@ public sealed class CorrectionCoordinator : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _preparation.Dispose();
         _requestCancellation?.Cancel();
         _fallbackTimer.Stop();
         _focusWatcher.Changed -= FocusWatcher_OnChanged;
@@ -441,6 +497,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _requestSnapshot = null;
         _undo = null;
         _tray.ProviderChanged -= Tray_OnProviderChanged;
+        _tray.PreparationChanged -= Tray_OnPreparationChanged;
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _overlay.Close();
     }

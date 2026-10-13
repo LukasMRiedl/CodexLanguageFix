@@ -104,6 +104,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
                 null,
                 TimeSpan.Zero)
             {
+                CacheHit = true,
                 LunaExecution = CreateExecution(
                     cached.CorrectedText,
                     cached.ChangeCount,
@@ -197,6 +198,7 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
         structureValidation.Stop();
         validation += structureValidation.Elapsed;
         stopwatch.Stop();
+        cancellationToken.ThrowIfCancellationRequested();
         _cache?.Set(cacheKey, new LunaCachedCorrection(restored, changeCount));
         var timings = CreateTransportIndependentTimings(transportTiming, validation, restoration);
         return new CorrectionProviderResult(restored, changeCount, Kind, null, stopwatch.Elapsed)
@@ -206,6 +208,26 @@ public sealed class LunaCorrectionProvider : ICorrectionProvider, IOpenAiConnect
     }
 
     private async Task<CorrectionPayload> CorrectFullTextAsync(
+        LunaProtectedText protectedText,
+        string original,
+        LunaModelSelection selection,
+        CancellationToken cancellationToken)
+    {
+        var first = await CorrectFullTextOnceAsync(protectedText, original, selection, cancellationToken).ConfigureAwait(false);
+        if (!RepeatedSentenceGuard.HasReducedUnchangedRepetitions(original, first.Restored)) return first;
+        cancellationToken.ThrowIfCancellationRequested();
+        var retry = await CorrectFullTextOnceAsync(protectedText, original, selection, cancellationToken).ConfigureAwait(false);
+        if (RepeatedSentenceGuard.HasReducedUnchangedRepetitions(original, retry.Restored))
+            throw new LanguageFixException(localizer.Get(AppText.LunaInvalidResponse));
+        return retry with
+        {
+            Validation = first.Validation + retry.Validation,
+            Restoration = first.Restoration + retry.Restoration,
+            TransportTiming = CombineTransportTimings(first.TransportTiming, retry.TransportTiming)
+        };
+    }
+
+    private async Task<CorrectionPayload> CorrectFullTextOnceAsync(
         LunaProtectedText protectedText,
         string original,
         LunaModelSelection selection,

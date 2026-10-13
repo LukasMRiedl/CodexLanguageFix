@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Automation;
@@ -144,6 +146,88 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void InstalledSyntheticComposer_RealAltGrShortcutUndoAndCleanup()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_INSTALLED_SHORTCUT_SMOKE") != "1") return;
+
+        var targetWindowText = RequiredEnvironmentVariable("CODEX_LANGUAGE_FIX_INSTALLED_SHORTCUT_HWND");
+        var targetWindow = ParseWindowHandle(targetWindowText);
+        var appProcessId = int.Parse(
+            RequiredEnvironmentVariable("CODEX_LANGUAGE_FIX_INSTALLED_SHORTCUT_PID"),
+            NumberStyles.None,
+            CultureInfo.InvariantCulture);
+        var expectedExecutable = Path.GetFullPath(
+            RequiredEnvironmentVariable("CODEX_LANGUAGE_FIX_INSTALLED_SHORTCUT_EXE"));
+
+        Assert.True(IsWindow(targetWindow), "Das explizit angegebene Composer-Fenster ist nicht mehr vorhanden.");
+        using var app = Process.GetProcessById(appProcessId);
+        Assert.False(app.HasExited, "Der explizit angegebene Installationsprozess läuft nicht mehr.");
+        Assert.Equal(expectedExecutable, Path.GetFullPath(app.MainModule?.FileName
+            ?? throw new InvalidOperationException("Der Installationspfad des Zielprozesses ist nicht lesbar.")),
+            StringComparer.OrdinalIgnoreCase);
+        _ = GetWindowThreadProcessId(targetWindow, out var hostProcessId);
+        Assert.True(hostProcessId > 0 && hostProcessId != appProcessId,
+            "Das Ziel-HWND muss zum Composer-Host gehören und vom installierten Korrekturprozess verschieden sein.");
+        Assert.Equal(targetWindow, GetForegroundWindow());
+
+        var accessor = new CodexComposerAccessor();
+        var original = CaptureTargetEmptyComposer(accessor, targetWindow, hostProcessId);
+        Assert.True(IsEmptyObservedComposer(original.Text),
+            "Der exakt fokussierte Composer muss leer sein.");
+        Assert.Equal(CodexComposerAccessor.NativeInputSize, Marshal.SizeOf<KeyboardInputEvent>());
+
+        var fixtureStates = new HashSet<string>(StringComparer.Ordinal) { string.Empty };
+        fixtureStates.Add(original.Text);
+        for (var length = 1; length <= OriginalFixture.Length; length++)
+            fixtureStates.Add(OriginalFixture[..length]);
+        fixtureStates.UnionWith(PlannedStates(OriginalFixture, CorrectedFixture));
+
+        var localizer = new AppLocalizer(new SettingsService().Load().Language);
+        var fixtureInputStarted = false;
+        var cleanupVerified = false;
+        var correctionTimer = new Stopwatch();
+        try
+        {
+            AssertGermanLayoutAndReleasedKeys();
+            AssertTargetComposer(accessor, original, targetWindow, hostProcessId, original.Text);
+
+            fixtureInputStarted = true;
+            SendUnicodeText(OriginalFixture);
+            WaitForComposerText(accessor, original, targetWindow, hostProcessId,
+                OriginalFixture, fixtureStates, TimeSpan.FromSeconds(5));
+
+            _ = WaitForButton(app, localizer.Get(AppText.CorrectAutomationName));
+            AssertTargetComposer(accessor, original, targetWindow, hostProcessId, OriginalFixture);
+            AssertGermanLayoutAndReleasedKeys();
+            correctionTimer.Start();
+            SendAltGrComma();
+            WaitForComposerText(accessor, original, targetWindow, hostProcessId,
+                CorrectedFixture, PlannedStates(OriginalFixture, CorrectedFixture), TimeSpan.FromSeconds(60));
+            correctionTimer.Stop();
+
+            var undo = WaitForButton(app, localizer.Get(AppText.Undo));
+            AssertTargetComposer(accessor, original, targetWindow, hostProcessId, CorrectedFixture);
+            ClickOwnButton(app, undo, targetWindow,
+                () => AssertTargetComposer(accessor, original, targetWindow, hostProcessId, CorrectedFixture));
+            WaitForComposerText(accessor, original, targetWindow, hostProcessId,
+                OriginalFixture, PlannedStates(CorrectedFixture, OriginalFixture), TimeSpan.FromSeconds(10));
+            AssertTargetComposer(accessor, original, targetWindow, hostProcessId, OriginalFixture);
+
+            ClearKnownSyntheticText(accessor, original, targetWindow, hostProcessId, fixtureStates);
+            cleanupVerified = true;
+            output.WriteLine($"installed_shortcut_smoke: fixture_characters={OriginalFixture.Length}; trigger_to_write_ms={correctionTimer.Elapsed.TotalMilliseconds:F1}; cleanup_verified={cleanupVerified}");
+        }
+        finally
+        {
+            if (fixtureInputStarted && !cleanupVerified)
+            {
+                // Failure cleanup is limited to known prefixes/edit-plan states from this synthetic fixture.
+                ClearKnownSyntheticText(accessor, original, targetWindow, hostProcessId, fixtureStates);
+            }
+        }
+    }
+
+    [Fact]
     public void PreparedSyntheticRepeatedBullets_DirectNativeRoundTrips()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_REPEATED_BULLETS_NATIVE_TEST") != "1") return;
@@ -252,7 +336,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_FIXTURE_PROBE") != "1") return;
 
-        var snapshot = new CodexComposerAccessor().TryCaptureFocusedComposer();
+        var snapshot = new CodexComposerAccessor().TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
         Assert.True(snapshot is not null && snapshot.Host == ComposerHost.Codex,
             "Die vorbereitete Codex-Testeingabe ist nicht eindeutig erreichbar.");
         var text = snapshot!.Text;
@@ -280,11 +364,34 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void PreparedSyntheticFocusedComposer_CorrectionCaptureAndRefreshSkipLayoutDiscovery()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_LAYOUT_FREE_CAPTURE_TEST") != "1") return;
+
+        var accessor = new CodexComposerAccessor();
+        var snapshot = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
+        Assert.True(snapshot is not null && snapshot.Host == ComposerHost.Codex,
+            "Die vorbereitete Codex-Testeingabe ist nicht mit Tastaturfokus erreichbar.");
+        Assert.Contains(SentenceFixtures.Concat(ParagraphFixtures), fixture => fixture.Original == snapshot!.Text);
+        Assert.Equal(snapshot!.EditorBounds, snapshot.Bounds);
+        Assert.Null(snapshot.RightControlBounds);
+        Assert.Null(snapshot.OccupiedBounds);
+        Assert.Null(snapshot.PlacementBounds);
+        Assert.Null(snapshot.EditorTextBounds);
+        Assert.Equal(0, accessor.LayoutCaptureCount);
+
+        var refreshed = accessor.TryRefresh(snapshot);
+        Assert.True(snapshot.SameEditor(refreshed) && refreshed!.Text == snapshot.Text,
+            "Der frische Snapshot muss denselben beschreibbaren Testeditor enthalten.");
+        Assert.Equal(0, accessor.LayoutCaptureCount);
+    }
+
     private void RunOverlayRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
     {
         using var dpiScope = new LiveDpiScope();
         var accessor = new CodexComposerAccessor();
-        var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost);
+        var (original, correctedText) = CapturePreparedFixture(accessor, fixtures, expectedHost, includeLayout: true);
         var originalText = original.Text;
         output.WriteLine($"fixtureCharacters={originalText.Length}; lineBreaks={originalText.Count(c => c == '\n')}");
         var correctionStates = PlannedStates(originalText, correctedText);
@@ -349,7 +456,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
 
         void AssertCurrentText(string expected)
         {
-            var current = accessor.TryCaptureFocusedComposer();
+            var current = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
             Assert.True(original.SameEditor(current) && current!.Text == expected,
                 "Editoridentität oder synthetische Testeingabe hat sich vor der Aktion geändert.");
         }
@@ -359,7 +466,7 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
             var stopwatch = Stopwatch.StartNew();
             while (stopwatch.Elapsed < TimeSpan.FromSeconds(60))
             {
-                var current = accessor.TryCaptureFocusedComposer();
+                var current = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
                 Assert.True(original.SameEditor(current),
                     "Der ursprüngliche Testeditor ist während der Prüfung nicht mehr aktiv.");
                 if (current!.Text == expected) return;
@@ -415,9 +522,11 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         var originalText = original.Text;
         output.WriteLine($"fixtureCharacters={originalText.Length}; lineBreaks={originalText.Count(c => c == '\n')}");
 
+        var layoutCapturesBeforeWrite = accessor.LayoutCaptureCount;
         var applied = accessor.TryReplace(original, originalText, correctedText);
+        Assert.Equal(layoutCapturesBeforeWrite, accessor.LayoutCaptureCount);
         if (!applied && original.NativeElement is AutomationElement native
-            && original.SameEditor(accessor.TryCaptureFocusedComposer())
+            && original.SameEditor(accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true))
             && accessor.TryRefresh(original)?.Text == originalText)
         {
             var pattern = (TextPattern)native.GetCurrentPattern(TextPattern.Pattern);
@@ -446,26 +555,248 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         var corrected = accessor.TryRefresh(original);
         Assert.True(original.SameEditor(corrected) && corrected!.Text == correctedText,
             "Die native Korrektur wurde nicht exakt im ursprünglichen Testeditor bestätigt.");
-        var active = accessor.TryCaptureFocusedComposer();
+        Assert.Equal(layoutCapturesBeforeWrite, accessor.LayoutCaptureCount);
+        var active = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
         Assert.True(original.SameEditor(active) && active!.Text == correctedText,
             "Vor dem nativen Rückweg ist nicht mehr derselbe unveränderte Testeditor aktiv.");
 
         Assert.True(accessor.TryReplace(corrected!, correctedText, originalText), accessor.LastWriteStatus);
+        Assert.Equal(layoutCapturesBeforeWrite, accessor.LayoutCaptureCount);
         var restored = accessor.TryRefresh(original);
         Assert.True(original.SameEditor(restored) && restored!.Text == originalText,
             "Der native Rückweg hat die synthetische Testeingabe nicht exakt wiederhergestellt.");
     }
 
     private static (ComposerSnapshot Original, string CorrectedText) CapturePreparedFixture(
-        CodexComposerAccessor accessor, IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)
+        CodexComposerAccessor accessor,
+        IReadOnlyList<PreparedFixture> fixtures,
+        ComposerHost expectedHost,
+        bool includeLayout = false)
     {
-        var original = accessor.TryCaptureFocusedComposer();
+        var original = includeLayout
+            ? accessor.TryPollFocusedComposer()
+            : accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
         Assert.True(original is not null && original.Host == expectedHost,
             "Die vorbereitete Testeingabe ist nicht eindeutig im explizit erwarteten Host erreichbar.");
+        Assert.Equal(includeLayout ? 1 : 0, accessor.LayoutCaptureCount);
         var fixture = fixtures.FirstOrDefault(candidate => candidate.Original == original!.Text);
         Assert.True(fixture is not null,
             "Der Live-Test darf ausschließlich eine vollständig übereinstimmende synthetische Fixturevariante bedienen.");
         return (original!, fixture!.Corrected);
+    }
+
+    private static string RequiredEnvironmentVariable(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        Assert.False(string.IsNullOrWhiteSpace(value), $"Die explizite Zielangabe {name} fehlt.");
+        return value!;
+    }
+
+    private static nint ParseWindowHandle(string value)
+    {
+        var handle = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? long.Parse(value.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture)
+            : long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
+        Assert.True(handle > 0, "Das Composer-HWND muss ein positiver nativer Handle sein.");
+        return (nint)handle;
+    }
+
+    private static bool IsEmptyObservedComposer(string text) => text.Length == 0
+        || string.Equals(text.TrimEnd('\r', '\n'), "Mit Codex arbeiten", StringComparison.Ordinal);
+
+    private static ComposerSnapshot CaptureTargetEmptyComposer(
+        CodexComposerAccessor accessor,
+        nint targetWindow,
+        int hostProcessId)
+    {
+        Assert.Equal(targetWindow, GetForegroundWindow());
+        var focused = AutomationElement.FocusedElement;
+        Assert.NotNull(focused);
+        Assert.True(focused!.Current.HasKeyboardFocus);
+        Assert.Equal(hostProcessId, focused.Current.ProcessId);
+        Assert.Equal(ComposerHost.Codex, ComposerHostProcess.Identify(focused.Current.ProcessId));
+        Assert.True(CodexComposerAccessor.IsComposerShapeForHost(
+            focused.Current.ControlType, focused.Current.ClassName, ComposerHost.Codex),
+            "Das direkt fokussierte Element hat nicht die bekannte Codex-Composer-Form.");
+
+        var snapshot = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
+        if (snapshot is null && accessor.LastCaptureStatus == "ambiguous_placeholder")
+            snapshot = CaptureConfirmedEmptyPlaceholder(accessor);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(ComposerHost.Codex, snapshot!.Host);
+        Assert.Equal("chat", snapshot.FieldCategory);
+        Assert.Equal(targetWindow, snapshot.HostWindow);
+        Assert.Equal(hostProcessId, snapshot.ProcessId);
+        Assert.NotEmpty(snapshot.RuntimeId);
+        Assert.True(IsEmptyObservedComposer(snapshot.Text),
+            "Der fokussierte Composer enthält keine leere Eingabe.");
+        return snapshot;
+    }
+
+    private static ComposerSnapshot? CaptureConfirmedEmptyPlaceholder(CodexComposerAccessor accessor)
+    {
+        var focused = AutomationElement.FocusedElement;
+        if (focused is null || !focused.Current.HasKeyboardFocus
+            || !string.Equals(focused.Current.Name, "Mit Codex arbeiten", StringComparison.Ordinal)
+            || ComposerHostProcess.Identify(focused.Current.ProcessId) != ComposerHost.Codex
+            || !CodexComposerAccessor.IsComposerShapeForHost(
+                focused.Current.ControlType, focused.Current.ClassName, ComposerHost.Codex))
+            return null;
+
+        var createSnapshot = typeof(CodexComposerAccessor).GetMethod(
+            "CreateSnapshot", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (createSnapshot is null) return null;
+        var snapshot = createSnapshot.Invoke(accessor, [focused, ComposerHost.Codex, false, false]) as ComposerSnapshot;
+        return snapshot is not null && IsEmptyObservedComposer(snapshot.Text) ? snapshot : null;
+    }
+
+    private static ComposerSnapshot CaptureTargetComposer(
+        CodexComposerAccessor accessor,
+        ComposerSnapshot expected,
+        nint targetWindow,
+        int hostProcessId)
+    {
+        Assert.Equal(targetWindow, GetForegroundWindow());
+        var current = accessor.TryCaptureFocusedComposerWithoutLayout(requireKeyboardFocus: true);
+        if (current is null && accessor.LastCaptureStatus == "ambiguous_placeholder")
+            current = CaptureConfirmedEmptyPlaceholder(accessor);
+
+        Assert.True(expected.SameEditor(current), "Der ursprüngliche fokussierte Composer ist nicht mehr aktiv.");
+        Assert.Equal(ComposerHost.Codex, current!.Host);
+        Assert.Equal("chat", current.FieldCategory);
+        Assert.Equal(targetWindow, current.HostWindow);
+        Assert.Equal(hostProcessId, current.ProcessId);
+        return current;
+    }
+
+    private static void AssertTargetComposer(
+        CodexComposerAccessor accessor,
+        ComposerSnapshot expected,
+        nint targetWindow,
+        int hostProcessId,
+        string expectedText)
+    {
+        var current = CaptureTargetComposer(accessor, expected, targetWindow, hostProcessId);
+        Assert.Equal(expectedText, current.Text);
+    }
+
+    private static void WaitForComposerText(
+        CodexComposerAccessor accessor,
+        ComposerSnapshot expected,
+        nint targetWindow,
+        int hostProcessId,
+        string expectedText,
+        IReadOnlySet<string> permittedStates,
+        TimeSpan timeout)
+    {
+        var timer = Stopwatch.StartNew();
+        while (timer.Elapsed < timeout)
+        {
+            var current = CaptureTargetComposer(accessor, expected, targetWindow, hostProcessId);
+            if (string.Equals(current.Text, expectedText, StringComparison.Ordinal)) return;
+            Assert.Contains(current.Text, permittedStates);
+            Thread.Sleep(50);
+        }
+
+        Assert.Fail("Der Composer hat den erwarteten synthetischen Zustand nicht rechtzeitig erreicht.");
+    }
+
+    private static void ClearKnownSyntheticText(
+        CodexComposerAccessor accessor,
+        ComposerSnapshot expected,
+        nint targetWindow,
+        int hostProcessId,
+        IReadOnlySet<string> permittedSyntheticStates)
+    {
+        var current = CaptureTargetComposer(accessor, expected, targetWindow, hostProcessId);
+        if (IsEmptyObservedComposer(current.Text)) return;
+        Assert.Contains(current.Text, permittedSyntheticStates);
+        AssertGermanLayoutAndReleasedKeys();
+
+        SendSelectAllBackspace();
+        var timer = Stopwatch.StartNew();
+        while (timer.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            current = CaptureTargetComposer(accessor, expected, targetWindow, hostProcessId);
+            if (IsEmptyObservedComposer(current.Text)) return;
+            Assert.Contains(current.Text, permittedSyntheticStates);
+            Thread.Sleep(50);
+        }
+
+        Assert.Fail("Die bekannte synthetische Eingabe ließ sich nicht verifiziert entfernen.");
+    }
+
+    private static void AssertGermanLayoutAndReleasedKeys()
+    {
+        var language = unchecked((ushort)(GetKeyboardLayout(0).ToInt64() & 0xFFFF));
+        Assert.Equal(0x0007, language & 0x03FF);
+        foreach (var key in new ushort[] { 0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xBC })
+            Assert.Equal((short)0, (short)(GetAsyncKeyState(key) & 0x8000));
+    }
+
+    private static void SendUnicodeText(string text)
+    {
+        var inputs = text.SelectMany(character => new[]
+        {
+            KeyboardInput(0, character, 0x0004),
+            KeyboardInput(0, character, 0x0004 | 0x0002)
+        }).ToArray();
+        SendKeyboardInputExactly(inputs, "synthetic_fixture_input_failed");
+    }
+
+    private static void SendAltGrComma()
+    {
+        KeyboardInputEvent[] inputs = [
+            KeyboardInput(0xA5, 0, 0x0001),
+            KeyboardInput(0xBC, 0, 0),
+            KeyboardInput(0xBC, 0, 0x0002),
+            KeyboardInput(0xA5, 0, 0x0001 | 0x0002)];
+        SendKeyboardInputExactly(inputs, "installed_altgr_shortcut_input_failed");
+    }
+
+    private static void SendSelectAllBackspace()
+    {
+        KeyboardInputEvent[] inputs = [
+            KeyboardInput(0xA2, 0, 0),
+            KeyboardInput(0x41, 0, 0),
+            KeyboardInput(0x41, 0, 0x0002),
+            KeyboardInput(0xA2, 0, 0x0002),
+            KeyboardInput(0x08, 0, 0),
+            KeyboardInput(0x08, 0, 0x0002)];
+        SendKeyboardInputExactly(inputs, "guarded_synthetic_cleanup_input_failed");
+    }
+
+    private static KeyboardInputEvent KeyboardInput(ushort virtualKey, ushort scanCode, uint flags) => new()
+    {
+        Type = 1,
+        Data = new KeyboardInputUnion
+        {
+            Keyboard = new NativeKeyboardInput
+            {
+                VirtualKey = virtualKey,
+                ScanCode = scanCode,
+                Flags = flags
+            }
+        }
+    };
+
+    private static void SendKeyboardInputExactly(KeyboardInputEvent[] inputs, string failureMessage)
+    {
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<KeyboardInputEvent>()) == (uint)inputs.Length) return;
+        ReleaseInjectedKeyboardKeys();
+        Assert.Fail(failureMessage);
+    }
+
+    private static void ReleaseInjectedKeyboardKeys()
+    {
+        KeyboardInputEvent[] releases = [
+            KeyboardInput(0xA5, 0, 0x0001 | 0x0002),
+            KeyboardInput(0xBC, 0, 0x0002),
+            KeyboardInput(0xA2, 0, 0x0002),
+            KeyboardInput(0x08, 0, 0x0002),
+            KeyboardInput(0x41, 0, 0x0002)];
+        _ = SendInput((uint)releases.Length, releases, Marshal.SizeOf<KeyboardInputEvent>());
     }
 
     private static IReadOnlySet<string> PlannedStates(string original, string corrected)
@@ -613,6 +944,19 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, MouseInputEvent[] inputs, int inputSize);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint inputCount, KeyboardInputEvent[] inputs, int inputSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(ushort virtualKey);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetKeyboardLayout(uint threadId);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X; public int Y; }
 
@@ -654,5 +998,29 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         public uint Flags;
         public uint Time;
         public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInputEvent
+    {
+        public uint Type;
+        public KeyboardInputUnion Data;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct KeyboardInputUnion
+    {
+        [FieldOffset(0)] public NativeMouseInput Mouse;
+        [FieldOffset(0)] public NativeKeyboardInput Keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeKeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public nint ExtraInfo;
     }
 }
