@@ -20,6 +20,7 @@ public partial class OverlayWindow : Window
     private bool _busy;
     private bool _closed;
     private readonly AppLocalizer _localizer;
+    private CorrectionShortcut _shortcut = CorrectionShortcut.Default;
     private HwndSource? _overlaySource;
     private HwndSource? _statusPopupSource;
 
@@ -50,8 +51,14 @@ public partial class OverlayWindow : Window
         UndoText.Text = _localizer.Get(AppText.Undo);
         UndoButton.ToolTip = _localizer.Get(AppText.UndoTooltip);
         System.Windows.Automation.AutomationProperties.SetName(UndoButton, _localizer.Get(AppText.Undo));
-        CorrectButton.ToolTip = _localizer.Get(AppText.CorrectTooltip);
+        CorrectButton.ToolTip = _localizer.Get(AppText.CorrectTooltip, _shortcut.GetDisplayText(_localizer));
         System.Windows.Automation.AutomationProperties.SetName(CorrectButton, _localizer.Get(AppText.CorrectAutomationName));
+    }
+
+    public void SetShortcut(CorrectionShortcut shortcut)
+    {
+        _shortcut = shortcut;
+        ApplyLanguage();
     }
 
     public event EventHandler? CorrectRequested;

@@ -5,12 +5,12 @@ namespace CodexLanguageFix.UI;
 
 public partial class FirstRunWindow : Window
 {
-    public FirstRunWindow(AppLocalizer localizer)
+    public FirstRunWindow(AppLocalizer localizer, CorrectionShortcut? shortcut = null)
     {
         InitializeComponent();
         Language = System.Windows.Markup.XmlLanguage.GetLanguage(localizer.Culture.IetfLanguageTag);
         HeadingText.Text = localizer.Get(AppText.FirstRunHeading);
-        ExplanationText.Text = localizer.Get(AppText.FirstRunExplanation);
+        ExplanationText.Text = localizer.Get(AppText.FirstRunExplanation, (shortcut ?? CorrectionShortcut.Default).GetDisplayText(localizer));
         PrivacyText.Text = localizer.Get(AppText.FirstRunPrivacy);
         AcceptButton.Content = localizer.Get(AppText.Acknowledge);
     }

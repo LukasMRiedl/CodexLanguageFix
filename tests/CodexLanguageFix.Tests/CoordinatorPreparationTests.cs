@@ -10,9 +10,91 @@ using CodexLanguageFix.UI;
 
 namespace CodexLanguageFix.Tests;
 
+[Collection("Correction hotkey")]
 public sealed class CoordinatorPreparationTests
 {
     private static readonly TimeSpan DispatcherTimeout = TimeSpan.FromSeconds(4);
+
+    [Fact]
+    public void OpenSettings_PreventsCorrectionFromRunning()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            scenario.Composer.Current = Snapshot("Das ist ein fehler.");
+            typeof(CorrectionCoordinator).GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(scenario.Coordinator, true);
+            InvokeManualCorrection(scenario.Coordinator).GetAwaiter().GetResult();
+            Assert.Equal(0, scenario.Luna.RequestCount);
+            Assert.Empty(scenario.Composer.Writes);
+        });
+    }
+
+
+    [Fact]
+    public void SettingsRecording_PersistsNewShortcutThenCorrectsAndUndoesThroughTheMessageHandler()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            var snapshot = Snapshot("text mit fehler");
+            scenario.Composer.Current = snapshot;
+            Exception? dialogFailure = null;
+            dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                var window = (SettingsWindow)typeof(CorrectionCoordinator)
+                    .GetField("_settingsWindow", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(scenario.Coordinator)!;
+                try
+                {
+                    Assert.True((bool)typeof(CorrectionCoordinator)
+                        .GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .GetValue(scenario.Coordinator)!);
+                    var source = System.Windows.PresentationSource.FromVisual(window)!;
+                    ((System.Windows.Controls.Button)window.FindName("RecordButton")!)
+                        .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    Assert.False(((System.Windows.Controls.Button)window.FindName("SaveButton")!).IsEnabled);
+                    window.RaiseEvent(new System.Windows.Input.KeyEventArgs(
+                        System.Windows.Input.Keyboard.PrimaryDevice, source, Environment.TickCount,
+                        System.Windows.Input.Key.F23)
+                    { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+                    Assert.Equal("F23", ((System.Windows.Controls.TextBox)window.FindName("ShortcutDisplayTextBox")!).Text);
+                    ((System.Windows.Controls.Button)window.FindName("SaveButton")!)
+                        .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    Assert.True(window.DialogResult);
+                }
+                catch (Exception exception) { dialogFailure = exception; window.Close(); }
+            }));
+            InvokeCoordinatorMethod(scenario.Coordinator, "Tray_OnSettingsRequested", null, EventArgs.Empty);
+            if (dialogFailure is not null) ExceptionDispatchInfo.Capture(dialogFailure).Throw();
+            Assert.False((bool)typeof(CorrectionCoordinator)
+                .GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(scenario.Coordinator)!);
+            var reloaded = new SettingsService(scenario.DirectoryPath).Load();
+            var savedShortcut = new CorrectionShortcut(reloaded.ShortcutModifiers, reloaded.ShortcutVirtualKey);
+            Assert.Equal(new CorrectionShortcut(0, 0x86), savedShortcut);
+            var hotkey = (CodexLanguageFix.Windows.CorrectionHotkey)typeof(CorrectionCoordinator)
+                .GetField("_hotkey", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!;
+            Assert.Equal(savedShortcut, hotkey.Shortcut);
+            scenario.Luna.CompleteImmediately(snapshot.Text);
+            Assert.True(hotkey.SetEnabled(true));
+            var handled = false;
+            var messageArgs = new object[] { nint.Zero, 0x0312, (nint)1,
+                (nint)((savedShortcut.VirtualKey << 16) | savedShortcut.Modifiers), handled };
+            typeof(CodexLanguageFix.Windows.CorrectionHotkey)
+                .GetMethod("OnMessage", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(hotkey, messageArgs);
+            Assert.True((bool)messageArgs[4]);
+            Assert.True(PumpUntil(dispatcher, () => scenario.Composer.Writes.Count == 1, DispatcherTimeout));
+            Assert.Equal(Corrected(snapshot.Text), scenario.Composer.Current!.Text);
+            InvokeCoordinatorMethod(scenario.Coordinator, "Undo");
+            Assert.Equal(snapshot.Text, scenario.Composer.Current!.Text);
+            Assert.Contains("undone", scenario.LastStatus, StringComparison.OrdinalIgnoreCase);
+            using var restartedHotkey = new CodexLanguageFix.Windows.CorrectionHotkey();
+            Assert.True(restartedHotkey.SetShortcut(savedShortcut));
+            Assert.Equal(savedShortcut, restartedHotkey.Shortcut);
+        });
+    }
 
     [Fact]
     public void ManualRequestAdoptsRunningPreparationAndWritesOnlyAfterTheClick()
@@ -41,6 +123,7 @@ public sealed class CoordinatorPreparationTests
             Assert.Equal(2, scenario.Luna.RequestCount);
             Assert.Equal(1, scenario.Luna.InferenceCount);
             Assert.Single(scenario.Composer.Writes);
+            Assert.Contains("Prompt corrected", scenario.LastStatus);
             Assert.Equal(snapshot.Text, scenario.Composer.Writes[0].ExpectedText);
             Assert.Equal(Corrected(snapshot.Text), scenario.Composer.Writes[0].Replacement);
             Assert.True(PumpUntil(dispatcher, () => preparationTask.IsCompleted, DispatcherTimeout));
@@ -190,10 +273,10 @@ public sealed class CoordinatorPreparationTests
             .GetMethod("CorrectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(coordinator, [false])!;
 
-    private static void InvokeCoordinatorMethod(CorrectionCoordinator coordinator, string methodName) =>
+    private static void InvokeCoordinatorMethod(CorrectionCoordinator coordinator, string methodName, params object?[] args) =>
         typeof(CorrectionCoordinator)
             .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(coordinator, null);
+            .Invoke(coordinator, args);
 
     private static bool PumpUntil(Dispatcher dispatcher, Func<bool> condition, TimeSpan timeout)
     {
@@ -293,6 +376,8 @@ public sealed class CoordinatorPreparationTests
                 localizer);
         }
 
+        public string DirectoryPath => _directory;
+        public string LastStatus => _tray.LastStatus;
         public ComposerAccessor Composer { get; }
         public CachingProvider Luna { get; }
         public CachingProvider LanguageTool { get; }

@@ -18,6 +18,8 @@ public sealed class CorrectionCoordinator : IDisposable
     private readonly CodexFocusWatcher _focusWatcher;
     private readonly CorrectionHotkey _hotkey;
     private bool _shortcutFailureReported;
+    private SettingsWindow? _settingsWindow;
+    private bool _settingsOpen;
     private readonly DispatcherTimer _fallbackTimer;
     private readonly AppLocalizer _localizer;
     private readonly CorrectionPreparation _preparation;
@@ -53,6 +55,8 @@ public sealed class CorrectionCoordinator : IDisposable
         _preparation.Diagnostic += (eventName, length, elapsed) =>
             _logger.Write(eventName, length, elapsedMilliseconds: elapsed.TotalMilliseconds, provider: CorrectionProviderKind.Luna);
         _hotkey = new CorrectionHotkey();
+        _hotkey.SetShortcut(_tray.Shortcut);
+        _overlay.SetShortcut(_tray.Shortcut);
         _hotkey.CorrectRequested += async (_, _) => await CorrectAsync(fromShortcut: true);
         _focusWatcher = new CodexFocusWatcher(dispatcher);
         _focusWatcher.Changed += FocusWatcher_OnChanged;
@@ -64,6 +68,8 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray.ConnectOpenAiRequested += async (_, _) => await ConnectOpenAiAsync();
         _tray.ProviderChanged += Tray_OnProviderChanged;
         _tray.PreparationChanged += Tray_OnPreparationChanged;
+        _tray.SettingsRequested += Tray_OnSettingsRequested;
+        _tray.LastStatusChanged += Tray_OnLastStatusChanged;
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
     }
 
@@ -98,7 +104,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private void RefreshOverlayCore()
     {
-        if (!_tray.Enabled)
+        if (!_tray.Enabled || _settingsOpen)
         {
             _preparation.Clear();
             _composerAccessor.InvalidateLayout();
@@ -138,8 +144,10 @@ public sealed class CorrectionCoordinator : IDisposable
         {
             _shortcutFailureReported = true;
             _logger.Write("shortcut_registration_failed");
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable),
-                _localizer.Get(AppText.ShortcutUnavailable), System.Windows.Forms.ToolTipIcon.Warning);
+            _transientMessage = _localizer.Get(AppText.ShortcutUnavailable, _tray.Shortcut.GetDisplayText(_localizer));
+            _transientUntil = DateTimeOffset.UtcNow.AddSeconds(6);
+            _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable),
+                _localizer.Get(AppText.ShortcutUnavailable, _tray.Shortcut.GetDisplayText(_localizer)));
         }
         var canUndo = _undo is not null
             && _undo.Snapshot.SameEditor(snapshot)
@@ -155,7 +163,7 @@ public sealed class CorrectionCoordinator : IDisposable
     private async Task CorrectAsync(bool fromShortcut = false)
     {
         var commandStopwatch = Stopwatch.StartNew();
-        if (_busy || _disposed || !_tray.Enabled)
+        if (_busy || _disposed || !_tray.Enabled || _settingsOpen)
         {
             return;
         }
@@ -274,7 +282,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
             _undo = new UndoState(current, snapshot.Text, outcome.CorrectedText, outcome.ChangeCount, outcome.Provider);
             _overlay.ShowStatus(FormatChangeCount(outcome.ChangeCount, outcome.Provider, _localizer), true);
-            _tray.ShowMessage(
+            _tray.SetStatus(
                 _localizer.Get(AppText.PromptCorrected),
                 outcome.ChangeCount == 1
                     ? _localizer.Get(AppText.CorrectionAppliedOne, ProviderName(outcome.Provider))
@@ -292,7 +300,7 @@ public sealed class CorrectionCoordinator : IDisposable
             commandStopwatch.Stop();
             _logger.Write("check_failed", snapshot.Text.Length);
             ShowTransient(exception.Message, snapshot);
-            if (!_disposed) _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Warning);
+            if (!_disposed) _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), exception.Message);
         }
         catch (Exception exception)
         {
@@ -300,7 +308,7 @@ public sealed class CorrectionCoordinator : IDisposable
             _logger.Write("unexpected_check_failure", snapshot.Text.Length);
             var message = _localizer.Get(AppText.UnexpectedCorrectionFailure);
             ShowTransient(message, snapshot);
-            if (!_disposed) _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), message, System.Windows.Forms.ToolTipIcon.Error);
+            if (!_disposed) _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), message);
             System.Diagnostics.Debug.WriteLine(exception);
         }
         finally
@@ -356,17 +364,17 @@ public sealed class CorrectionCoordinator : IDisposable
         {
             var provider = GetCurrentProvider();
             var result = await provider.TestAsync(CancellationToken.None);
-            _tray.ShowMessage(
+            _tray.SetStatus(
                 _localizer.Get(AppText.ProviderAvailable, ProviderName(provider.Kind)),
                 _localizer.Get(AppText.ResponseTime, result.Elapsed.TotalMilliseconds));
         }
         catch (LanguageFixException exception)
         {
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Error);
+            _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), exception.Message);
         }
         catch (Exception)
         {
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure), System.Windows.Forms.ToolTipIcon.Error);
+            _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure));
         }
     }
 
@@ -375,15 +383,15 @@ public sealed class CorrectionCoordinator : IDisposable
         try
         {
             await _openAiConnection.ConnectAsync(CancellationToken.None);
-            _tray.ShowMessage(_localizer.Get(AppText.OpenAiConnected), _localizer.Get(AppText.ProviderAvailable, ProviderName(CorrectionProviderKind.Luna)));
+            _tray.SetStatus(_localizer.Get(AppText.OpenAiConnected), _localizer.Get(AppText.ProviderAvailable, ProviderName(CorrectionProviderKind.Luna)));
         }
         catch (LanguageFixException exception)
         {
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), exception.Message, System.Windows.Forms.ToolTipIcon.Error);
+            _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), exception.Message);
         }
         catch (Exception)
         {
-            _tray.ShowMessage(_localizer.Get(AppText.CorrectionUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure), System.Windows.Forms.ToolTipIcon.Error);
+            _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure));
         }
     }
 
@@ -414,6 +422,58 @@ public sealed class CorrectionCoordinator : IDisposable
         RefreshOverlay();
     }
 
+    private void Tray_OnSettingsRequested(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        if (_settingsWindow is not null) { _settingsWindow.Activate(); return; }
+        _settingsOpen = true;
+        try
+        {
+            _preparation.Clear();
+            _requestCancellation?.Cancel();
+            if (!_hotkey.SetEnabled(false))
+            {
+                _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable),
+                    _localizer.Get(AppText.ShortcutUnavailable, _tray.Shortcut.GetDisplayText(_localizer)));
+                return;
+            }
+            _overlay.Hide();
+            _settingsWindow = new SettingsWindow(_localizer, _tray.Shortcut, _tray.LastStatus, SaveShortcut);
+            _settingsWindow.ShowDialog();
+        }
+        finally
+        {
+            _settingsWindow = null;
+            _settingsOpen = false;
+            if (!_disposed) RefreshOverlay();
+        }
+    }
+
+    private string? SaveShortcut(CorrectionShortcut shortcut)
+    {
+        if (!shortcut.IsValid) return _localizer.Get(AppText.InvalidShortcut);
+        if (!_hotkey.TryProbe(shortcut, out var error))
+            return error == 1409 ? _localizer.Get(AppText.ShortcutConflict)
+                : _localizer.Get(AppText.ShortcutUnavailable, shortcut.GetDisplayText(_localizer));
+        var previous = _tray.Shortcut;
+        if (!_hotkey.SetShortcut(shortcut))
+            return _localizer.Get(AppText.ShortcutUnavailable, shortcut.GetDisplayText(_localizer));
+        try { _tray.SaveShortcut(shortcut); }
+        catch (Exception)
+        {
+            _hotkey.SetShortcut(previous);
+            return _localizer.Get(AppText.ShortcutSaveFailed);
+        }
+        _shortcutFailureReported = false;
+        _overlay.SetShortcut(shortcut);
+        _tray.SetStatus(_localizer.Get(AppText.Settings),
+            _localizer.Get(AppText.ShortcutSaved, shortcut.GetDisplayText(_localizer)));
+        return null;
+    }
+
+    private void Tray_OnLastStatusChanged(object? sender, EventArgs e) =>
+        _settingsWindow?.UpdateStatus(_tray.LastStatus);
+
     private ICorrectionProvider GetCurrentProvider()
     {
         if (_providers.TryGetValue(_tray.CurrentProvider, out var provider))
@@ -430,7 +490,9 @@ public sealed class CorrectionCoordinator : IDisposable
 
     private void ShowTransient(string message, ComposerSnapshot? origin = null)
     {
-        if (_disposed || (origin is not null && !origin.SameEditor(_composerAccessor.TryCaptureFocusedComposerWithoutLayout())))
+        if (_disposed) return;
+        _tray.SetStatus("Codex Language Fix", message);
+        if (origin is not null && !origin.SameEditor(_composerAccessor.TryCaptureFocusedComposerWithoutLayout()))
             return;
         _transientMessage = message;
         _transientUntil = DateTimeOffset.UtcNow.AddSeconds(6);
@@ -498,6 +560,9 @@ public sealed class CorrectionCoordinator : IDisposable
         _undo = null;
         _tray.ProviderChanged -= Tray_OnProviderChanged;
         _tray.PreparationChanged -= Tray_OnPreparationChanged;
+        _tray.SettingsRequested -= Tray_OnSettingsRequested;
+        _tray.LastStatusChanged -= Tray_OnLastStatusChanged;
+        _settingsWindow?.Close();
         _localizer.LanguageChanged -= Localizer_OnLanguageChanged;
         _overlay.Close();
     }

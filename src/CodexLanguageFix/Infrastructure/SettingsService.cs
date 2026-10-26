@@ -34,6 +34,14 @@ public sealed class SettingsService
                 settings.CorrectionProvider = CorrectionProviderKind.LanguageTool;
             }
 
+            var shortcut = new CorrectionShortcut(settings.ShortcutModifiers, settings.ShortcutVirtualKey);
+            if (!shortcut.IsValid)
+            {
+                settings.ShortcutModifiers = CorrectionShortcut.Default.Modifiers;
+                settings.ShortcutVirtualKey = CorrectionShortcut.Default.VirtualKey;
+                settings.ShortcutResetOnLoad = true;
+            }
+
             return settings;
         }
         catch (IOException)

@@ -40,7 +40,7 @@ public partial class App : System.Windows.Application
 
         if (!settings.FirstRunNoticeShown)
         {
-            var notice = new FirstRunWindow(localizer);
+            var notice = new FirstRunWindow(localizer, new CorrectionShortcut(settings.ShortcutModifiers, settings.ShortcutVirtualKey));
             if (notice.ShowDialog() != true)
             {
                 _exitReason = "notice_declined";

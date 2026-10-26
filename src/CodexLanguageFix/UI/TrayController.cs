@@ -20,12 +20,14 @@ public sealed class TrayController : IDisposable
     private readonly ToolStripMenuItem _automaticLanguageItem;
     private readonly ToolStripMenuItem _germanLanguageItem;
     private readonly ToolStripMenuItem _englishLanguageItem;
+    private readonly ToolStripMenuItem _settingsItem;
     private readonly ToolStripMenuItem _exitItem;
     private readonly AppSettings _settings;
     private readonly SettingsService _settingsService;
     private readonly AutostartService _autostartService;
     private readonly AppLocalizer _localizer;
     private bool _suppressAutostartEvent;
+    private string? _lastStatus;
 
     public TrayController(
         AppSettings settings,
@@ -73,7 +75,7 @@ public sealed class TrayController : IDisposable
                 _suppressAutostartEvent = true;
                 _autostartItem.Checked = !_autostartItem.Checked;
                 _suppressAutostartEvent = false;
-                ShowMessage(_localizer.Get(AppText.AutostartChangeFailed), exception.Message, ToolTipIcon.Error);
+                SetStatus(_localizer.Get(AppText.AutostartChangeFailed), exception.Message);
             }
         };
 
@@ -107,6 +109,8 @@ public sealed class TrayController : IDisposable
         _germanLanguageItem = CreateLanguageItem(AppLocalizer.German);
         _englishLanguageItem = CreateLanguageItem(AppLocalizer.English);
         _languageItem.DropDownItems.AddRange([_automaticLanguageItem, _germanLanguageItem, _englishLanguageItem]);
+        _settingsItem = new ToolStripMenuItem();
+        _settingsItem.Click += (_, _) => SettingsRequested?.Invoke(this, EventArgs.Empty);
         _exitItem = new ToolStripMenuItem();
         _exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
@@ -119,6 +123,7 @@ public sealed class TrayController : IDisposable
             _prepareLunaCorrectionsItem,
             _connectionItem,
             _languageItem,
+            _settingsItem,
             new ToolStripSeparator(),
             _exitItem
         ]);
@@ -132,6 +137,7 @@ public sealed class TrayController : IDisposable
         };
         _localizer.LanguageChanged += Localizer_OnLanguageChanged;
         ApplyLanguage();
+        if (settings.ShortcutResetOnLoad) _lastStatus = _localizer.Get(AppText.ShortcutSettingsReset, Shortcut.GetDisplayText(_localizer));
     }
 
     public event EventHandler? EnabledChanged;
@@ -140,6 +146,28 @@ public sealed class TrayController : IDisposable
     public event EventHandler? ProviderChanged;
     public event EventHandler? ConnectOpenAiRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler? SettingsRequested;
+    public event EventHandler? LastStatusChanged;
+    public CorrectionShortcut Shortcut => new(_settings.ShortcutModifiers, _settings.ShortcutVirtualKey);
+    public string LastStatus => _lastStatus ?? _localizer.Get(AppText.NoStatus);
+
+    public void SaveShortcut(CorrectionShortcut shortcut)
+    {
+        if (!shortcut.IsValid) throw new ArgumentException("Invalid shortcut.", nameof(shortcut));
+        var previous = Shortcut;
+        try
+        {
+            _settings.ShortcutModifiers = shortcut.Modifiers;
+            _settings.ShortcutVirtualKey = shortcut.VirtualKey;
+            Save();
+        }
+        catch
+        {
+            _settings.ShortcutModifiers = previous.Modifiers;
+            _settings.ShortcutVirtualKey = previous.VirtualKey;
+            throw;
+        }
+    }
 
     public bool Enabled => _settings.Enabled;
 
@@ -194,6 +222,7 @@ public sealed class TrayController : IDisposable
         _automaticLanguageItem.Text = _localizer.Get(AppText.LanguageAutomatic);
         _germanLanguageItem.Text = _localizer.Get(AppText.LanguageGerman);
         _englishLanguageItem.Text = _localizer.Get(AppText.LanguageEnglish);
+        _settingsItem.Text = _localizer.Get(AppText.Settings);
         _exitItem.Text = _localizer.Get(AppText.Exit);
         UpdateLanguageChecks();
         UpdateProviderChecks();
@@ -212,9 +241,10 @@ public sealed class TrayController : IDisposable
         _englishLanguageItem.Checked = _localizer.LanguageMode == AppLocalizer.English;
     }
 
-    public void ShowMessage(string title, string text, ToolTipIcon icon = ToolTipIcon.Info)
+    public void SetStatus(string title, string text)
     {
-        _notifyIcon.ShowBalloonTip(4000, title, text, icon);
+        _lastStatus = title + Environment.NewLine + text;
+        LastStatusChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Save() => _settingsService.Save(_settings);

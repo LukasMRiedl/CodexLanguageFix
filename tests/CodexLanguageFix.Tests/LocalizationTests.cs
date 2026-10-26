@@ -43,6 +43,25 @@ public sealed class LocalizationTests
     }
 
     [Theory]
+    [InlineData("de", "Tastenkürzel", "Speichern", "Abbrechen")]
+    [InlineData("en", "shortcut", "Save", "Cancel")]
+    public void ShortcutText_UsesTheSelectedShortcutDynamically(
+        string language,
+        string shortcut,
+        string save,
+        string cancel)
+    {
+        var localizer = new AppLocalizer(language);
+
+        Assert.Contains(shortcut, localizer.Get(AppText.CorrectTooltip, shortcut), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(shortcut, localizer.Get(AppText.FirstRunExplanation, shortcut), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(shortcut, localizer.Get(AppText.ShortcutUnavailable, shortcut), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(shortcut, localizer.Get(AppText.ShortcutSaved, shortcut), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(save, localizer.Get(AppText.Save));
+        Assert.Equal(cancel, localizer.Get(AppText.Cancel));
+    }
+
+    [Theory]
     [InlineData("DE", "de")]
     [InlineData("en-US", "auto")]
     [InlineData("unknown", "auto")]
@@ -88,7 +107,7 @@ public sealed class LocalizationTests
                 Assert.Equal(heading, firstRun.HeadingText.Text);
                 Assert.Equal(acknowledgement, firstRun.AcceptButton.Content);
                 Assert.Equal(undo, overlay.UndoText.Text);
-                Assert.Equal(localizer.Get(AppText.CorrectTooltip), overlay.CorrectButton.ToolTip);
+                Assert.Equal(localizer.Get(AppText.CorrectTooltip, CorrectionShortcut.Default.GetDisplayText(localizer)), overlay.CorrectButton.ToolTip);
                 Assert.Contains(stabilityDelay, firstRun.PrivacyText.Text);
 
                 firstRun.Close();

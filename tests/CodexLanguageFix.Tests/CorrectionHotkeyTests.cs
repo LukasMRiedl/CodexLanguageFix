@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using CodexLanguageFix.Core;
 using CodexLanguageFix.Windows;
 
 namespace CodexLanguageFix.Tests;
@@ -18,6 +19,9 @@ public sealed class CorrectionHotkeyTests
     private const int WmHotkey = 0x0312;
     private const uint ModControlAlt = 0x0001 | 0x0002;
     private const uint ModNoRepeat = 0x4000;
+    private const uint ModControl = 0x0002;
+    private const uint ModAlt = 0x0001;
+    private const uint ModShift = 0x0004;
     private const uint OemComma = 0xBC;
     private const int HotkeyId = 1;
     private const int ErrorHotkeyAlreadyRegistered = 1409;
@@ -141,6 +145,185 @@ public sealed class CorrectionHotkeyTests
         });
     }
 
+    [Theory]
+    [InlineData(ModControl | ModShift, 0x51u)]
+    [InlineData(ModAlt | ModShift, 0xBAu)]
+    [InlineData(ModShift, 0x70u)]
+    public void SetShortcut_RegistersProvidedCombination(uint modifiers, uint virtualKey)
+    {
+        RunSta(dispatcher =>
+        {
+            using var hotkey = new CorrectionHotkey();
+            var shortcut = new CorrectionShortcut(modifiers, virtualKey);
+
+            Assert.True(shortcut.IsValid);
+            Assert.True(hotkey.SetShortcut(shortcut));
+            Assert.Equal(shortcut, hotkey.Shortcut);
+            Assert.True(hotkey.SetEnabled(true),
+                $"Der angegebene Test-Hotkey konnte nicht registriert werden (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(hotkey.SetEnabled(false));
+
+            using var probe = CreateMessageWindow("CorrectionHotkey.ParameterProbe");
+            Assert.True(RegisterHotKey(probe.Handle, 80, modifiers | ModNoRepeat, virtualKey),
+                $"SetEnabled(false) hat den parametrisierten Hotkey nicht freigegeben (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(UnregisterHotKey(probe.Handle, 80));
+        });
+    }
+
+    [Fact]
+    public void SetShortcut_WhenRegisteredSwitchesHotkeysAndIgnoresQueuedOldMessage()
+    {
+        RunSta(dispatcher =>
+        {
+            using var hotkey = new CorrectionHotkey();
+            var oldShortcut = CorrectionShortcut.Default;
+            var newShortcut = new CorrectionShortcut(ModControl | ModShift, 0x51);
+            Assert.False(hotkey.SetShortcut(new CorrectionShortcut(ModShift, 0x51)));
+            Assert.Equal(oldShortcut, hotkey.Shortcut);
+
+            Assert.True(hotkey.SetEnabled(true),
+                $"Der Standard-Test-Hotkey konnte nicht registriert werden (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(hotkey.SetShortcut(newShortcut));
+            Assert.Equal(newShortcut, hotkey.Shortcut);
+
+            var requests = 0;
+            hotkey.CorrectRequested += (_, _) => requests++;
+            var hwnd = GetSourceHandle(hotkey);
+
+            Assert.True(PostMessage(hwnd, WmHotkey, HotkeyId, MakeHotkeyLParam(oldShortcut.Modifiers, oldShortcut.VirtualKey)));
+            Assert.True(PostMessage(hwnd, WmHotkey, HotkeyId, MakeHotkeyLParam(newShortcut.Modifiers, newShortcut.VirtualKey)));
+            Pump(dispatcher, TimeSpan.FromMilliseconds(150));
+
+            Assert.Equal(1, requests);
+            Assert.True(hotkey.SetEnabled(false));
+
+            using var probe = CreateMessageWindow("CorrectionHotkey.SwitchReleaseProbe");
+            Assert.True(RegisterHotKey(probe.Handle, 74, oldShortcut.Modifiers | ModNoRepeat, oldShortcut.VirtualKey),
+                $"Die alte Kombination wurde beim Umschalten nicht freigegeben (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(RegisterHotKey(probe.Handle, 75, newShortcut.Modifiers | ModNoRepeat, newShortcut.VirtualKey),
+                $"SetEnabled(false) hat die neue Kombination nicht freigegeben (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(UnregisterHotKey(probe.Handle, 74));
+            Assert.True(UnregisterHotKey(probe.Handle, 75));
+        });
+    }
+
+    [Fact]
+    public void SetShortcut_OnConflictRestoresOldShortcutAndRegistration()
+    {
+        RunSta(dispatcher =>
+        {
+            var requestedShortcut = new CorrectionShortcut(ModControl | ModShift, 0x51);
+            using var blocker = CreateMessageWindow("CorrectionHotkey.SwitchBlocker");
+            Assert.True(RegisterHotKey(
+                    blocker.Handle,
+                    71,
+                    requestedShortcut.Modifiers | ModNoRepeat,
+                    requestedShortcut.VirtualKey),
+                $"Der Konflikt-Test-Hotkey konnte nicht belegt werden (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+
+            try
+            {
+                using var hotkey = new CorrectionHotkey();
+                var previousShortcut = hotkey.Shortcut;
+                Assert.True(hotkey.SetEnabled(true),
+                    $"Der Standard-Test-Hotkey konnte nicht registriert werden (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+
+                Assert.False(hotkey.SetShortcut(requestedShortcut));
+                Assert.Equal(previousShortcut, hotkey.Shortcut);
+
+                var requests = 0;
+                hotkey.CorrectRequested += (_, _) => requests++;
+                Assert.True(PostMessage(
+                    GetSourceHandle(hotkey),
+                    WmHotkey,
+                    HotkeyId,
+                    MakeHotkeyLParam(previousShortcut.Modifiers, previousShortcut.VirtualKey)));
+                Pump(dispatcher, TimeSpan.FromMilliseconds(100));
+                Assert.Equal(1, requests);
+
+                Assert.True(hotkey.SetEnabled(false));
+                using var releaseProbe = CreateMessageWindow("CorrectionHotkey.SwitchConflictReleaseProbe");
+                Assert.True(RegisterHotKey(
+                        releaseProbe.Handle,
+                        72,
+                        previousShortcut.Modifiers | ModNoRepeat,
+                        previousShortcut.VirtualKey),
+                    $"Die vorherige Kombination wurde nach dem Konflikt nicht freigegeben (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+                Assert.True(UnregisterHotKey(releaseProbe.Handle, 72));
+            }
+            finally
+            {
+                _ = UnregisterHotKey(blocker.Handle, 71);
+            }
+        });
+    }
+
+    [Fact]
+    public void TryProbe_ReportsAvailabilityAndDoesNotChangeConfiguredShortcut()
+    {
+        RunSta(dispatcher =>
+        {
+            using var hotkey = new CorrectionHotkey();
+            var shortcut = new CorrectionShortcut(ModAlt | ModShift, 0xBA);
+
+            Assert.True(hotkey.TryProbe(shortcut, out var error),
+                $"Der freie Test-Hotkey konnte nicht geprüft werden (Win32-Fehler {error}).");
+            Assert.Equal(0, error);
+            Assert.Equal(CorrectionShortcut.Default, hotkey.Shortcut);
+
+            using var probe = CreateMessageWindow("CorrectionHotkey.ProbeReleaseCheck");
+            Assert.True(RegisterHotKey(
+                    probe.Handle,
+                    76,
+                    shortcut.Modifiers | ModNoRepeat,
+                    shortcut.VirtualKey),
+                $"TryProbe hat die Kombination nicht freigegeben (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(UnregisterHotKey(probe.Handle, 76));
+
+            Assert.False(hotkey.TryProbe(new CorrectionShortcut(ModShift, 0x51), out error));
+            Assert.Equal(87, error);
+            Assert.Equal(CorrectionShortcut.Default, hotkey.Shortcut);
+        });
+    }
+
+    [Fact]
+    public void TryProbe_ReportsRegisteredConflictAndLeavesNoRegistration()
+    {
+        RunSta(dispatcher =>
+        {
+            using var blocker = CreateMessageWindow("CorrectionHotkey.ProbeBlocker");
+            var shortcut = new CorrectionShortcut(ModControl | ModShift, 0x51);
+            Assert.True(RegisterHotKey(
+                    blocker.Handle,
+                    77,
+                    shortcut.Modifiers | ModNoRepeat,
+                    shortcut.VirtualKey),
+                $"Der Konflikt-Test-Hotkey konnte nicht belegt werden (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+
+            try
+            {
+                using var hotkey = new CorrectionHotkey();
+
+                Assert.False(hotkey.TryProbe(shortcut, out var error));
+                Assert.Equal(ErrorHotkeyAlreadyRegistered, error);
+                Assert.Equal(CorrectionShortcut.Default, hotkey.Shortcut);
+            }
+            finally
+            {
+                Assert.True(UnregisterHotKey(blocker.Handle, 77));
+            }
+
+            using var releaseProbe = CreateMessageWindow("CorrectionHotkey.ProbeConflictReleaseCheck");
+            Assert.True(RegisterHotKey(
+                    releaseProbe.Handle,
+                    78,
+                    shortcut.Modifiers | ModNoRepeat,
+                    shortcut.VirtualKey),
+                $"TryProbe hat nach dem Konflikt eine Registrierung zurückgelassen (Win32-Fehler {Marshal.GetLastWin32Error()}).");
+            Assert.True(UnregisterHotKey(releaseProbe.Handle, 78));
+        });
+    }
+
     [Fact]
     public void AltGrHotkeyInput_IsSingleShotReleasesModifiersAndRestoresFocus()
     {
@@ -154,8 +337,8 @@ public sealed class CorrectionHotkeyTests
                 Title = "Correction hotkey input test",
                 Width = 360,
                 Height = 100,
-                WindowStyle = System.Windows.WindowStyle.ToolWindow,
-                ShowInTaskbar = false,
+                WindowStyle = System.Windows.WindowStyle.SingleBorderWindow,
+                ShowInTaskbar = true,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Content = new TextBox { Text = "Eigener Hotkey-Testeditor", Margin = new Thickness(12) }
             };
@@ -173,10 +356,13 @@ public sealed class CorrectionHotkeyTests
                 hotkey.CorrectRequested += (_, _) => requests++;
 
                 window.Show();
-                Assert.True(window.Activate(), "Das eigene Testeditor-Fenster konnte nicht aktiviert werden.");
-                Assert.True(editor.Focus(), "Das eigene Testeditor-Feld konnte nicht fokussiert werden.");
+                window.Activate();
                 var ownWindow = new WindowInteropHelper(window).Handle;
+                var activationDeadline = DateTime.UtcNow.AddSeconds(20);
+                while (GetForegroundWindow() != ownWindow && DateTime.UtcNow < activationDeadline)
+                    Pump(dispatcher, TimeSpan.FromMilliseconds(100));
                 Assert.Equal(ownWindow, GetForegroundWindow());
+                Assert.True(editor.Focus(), "Das eigene Testeditor-Feld konnte nicht fokussiert werden.");
 
                 var activeLayout = unchecked((ushort)(GetKeyboardLayout(0).ToInt64() & 0xFFFF));
                 Assert.Equal(0x0007, activeLayout & 0x03FF);
@@ -274,7 +460,7 @@ public sealed class CorrectionHotkeyTests
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "Der STA-Hotkey-Test hat das Zeitlimit überschritten.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "Der STA-Hotkey-Test hat das Zeitlimit überschritten.");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 

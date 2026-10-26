@@ -1,6 +1,6 @@
 # Privacy
 
-Codex Language Fix processes text only after you explicitly click the `Aa` button or press `AltGr+,` (`Ctrl+Alt+,` on a German layout), or when the optional Luna preparation setting is enabled and the app observes a stable prompt.
+Codex Language Fix processes text only after you explicitly click the `Aa` button or press your configured correction shortcut (default: `AltGr+,` / `Ctrl+Alt+,` on a German layout), or when the optional Luna preparation setting is enabled and the app observes a stable prompt.
 
 ## Data transmitted
 
@@ -8,7 +8,7 @@ The current prompt is sent to the provider selected in the system tray when you 
 
 - **LanguageTool:** the prompt is sent over HTTPS to the public endpoint at `https://api.languagetool.org/v2/check`. Processing is subject to LanguageTool's privacy terms.
 - **OpenAI Luna:** prose is sent through the official Codex App Server using Codex's ChatGPT OAuth session. At server startup, the app selects the newest Luna model offered by the installed official runtime that supports low reasoning and Fast Mode (`priority`), then uses that profile for the runtime. The app resolves it again after a runtime or account-context reset, so corrections do not repeat model-list discovery. Production requests the `baseline / low / full-v1` profile. Every request uses a fresh ephemeral thread. Processing and usage limits are subject to the terms of the ChatGPT account connected to Codex. The official Codex Desktop installation must be present, but Codex Desktop can remain closed while this app runs.
-- **Automatic Luna preparation:** the “Prepare Luna corrections” setting in the system tray is off by default. When enabled with Luna selected, the active app sends the current prompt after 1.2 seconds of observed text stability to prepare a correction. This may count toward the usage limits of the ChatGPT account connected to Codex. The app shows “Correction ready” when preparation finishes. The result is inserted only when you click `Aa` or press `AltGr+,`, after checking that the editor and text still match.
+- **Automatic Luna preparation:** the “Prepare Luna corrections” setting in the system tray is off by default. When enabled with Luna selected, the active app sends the current prompt after 1.2 seconds of observed text stability to prepare a correction. This may count toward the usage limits of the ChatGPT account connected to Codex. The app shows “Correction ready” when preparation finishes. The result is inserted only when you click `Aa` or use the configured shortcut, after checking that the editor and text still match.
 
 ## Data not transmitted
 
@@ -35,3 +35,5 @@ The app does not offer an OpenAI logout command because the OAuth session is sha
 ## Uninstallation
 
 Exit the app from its system tray menu, then delete the application folder. Settings and diagnostic logs are stored under `%LOCALAPPDATA%\CodexLanguageFix` and can be deleted separately.
+
+The shortcut recorder handles key combinations only while its manually opened recording UI is active. Only the selected modifiers and virtual-key code are stored in the existing local settings file. This does not add a global keyboard hook or a keystroke log. The app does not display automatic Windows notification balloons; its latest status is kept in memory and is available in the manually opened Settings dialog.

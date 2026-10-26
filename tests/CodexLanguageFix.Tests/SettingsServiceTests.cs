@@ -1,4 +1,3 @@
-using System.Text.Json;
 using CodexLanguageFix.Core;
 using CodexLanguageFix.Infrastructure;
 
@@ -7,7 +6,7 @@ namespace CodexLanguageFix.Tests;
 public sealed class SettingsServiceTests
 {
     [Fact]
-    public void ExistingSettingsWithoutProviderKeepLanguageToolDefault()
+    public void ExistingSettingsWithoutProviderOrShortcutKeepTheirDefaults()
     {
         var directory = CreateTemporaryDirectory();
         try
@@ -18,6 +17,9 @@ public sealed class SettingsServiceTests
 
             Assert.Equal(CorrectionProviderKind.LanguageTool, settings.CorrectionProvider);
             Assert.False(settings.PrepareLunaCorrections);
+            Assert.Equal(CorrectionShortcut.Default.Modifiers, settings.ShortcutModifiers);
+            Assert.Equal(CorrectionShortcut.Default.VirtualKey, settings.ShortcutVirtualKey);
+            Assert.False(settings.ShortcutResetOnLoad);
         }
         finally
         {
@@ -55,6 +57,57 @@ public sealed class SettingsServiceTests
             service.Save(new AppSettings { PrepareLunaCorrections = true });
 
             Assert.True(service.Load().PrepareLunaCorrections);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void ShortcutSettingsPersistButResetOnLoadFlagDoesNot()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var service = new SettingsService(directory);
+            service.Save(new AppSettings
+            {
+                ShortcutModifiers = 6,
+                ShortcutVirtualKey = 0x51,
+                ShortcutResetOnLoad = true
+            });
+
+            var savedJson = File.ReadAllText(Path.Combine(directory, "settings.json"));
+            Assert.DoesNotContain("shortcutResetOnLoad", savedJson.ToLowerInvariant());
+
+            var loaded = service.Load();
+
+            Assert.Equal(6u, loaded.ShortcutModifiers);
+            Assert.Equal(0x51u, loaded.ShortcutVirtualKey);
+            Assert.False(loaded.ShortcutResetOnLoad);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void InvalidStoredShortcutResetsToDefaultAndSetsResetOnLoadFlag()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "settings.json"),
+                "{\"shortcutModifiers\":8,\"shortcutVirtualKey\":65}");
+
+            var settings = new SettingsService(directory).Load();
+
+            Assert.Equal(CorrectionShortcut.Default.Modifiers, settings.ShortcutModifiers);
+            Assert.Equal(CorrectionShortcut.Default.VirtualKey, settings.ShortcutVirtualKey);
+            Assert.True(settings.ShortcutResetOnLoad);
         }
         finally
         {
