@@ -89,43 +89,6 @@ public sealed class TextStructureTests
         Assert.True(TextStructure.IsPreserved(original, original.Replace("Änderug", "Änderung", StringComparison.Ordinal)));
     }
 
-    [Fact]
-    public void LanguageToolDropsDestructiveEditsAndKeepsSafeCorrections()
-    {
-        const string text = "- korekt\r\n- Zweiter\r\n\r\n";
-        var engine = new CorrectionEngine();
-        var result = engine.Apply(text, engine.Annotate(text),
-        [
-            Match(0, 2, "", 0),
-            Match(text.IndexOf("\r\n", StringComparison.Ordinal), 2, " ", 1),
-            Match(2, 6, "korrekt", 2)
-        ]);
-
-        Assert.Equal("- korrekt\r\n- Zweiter\r\n\r\n", result.CorrectedText);
-        Assert.Single(result.Corrections);
-    }
-
-    [Fact]
-    public void LanguageToolCannotRemoveWholeContentThroughMultipleEdits()
-    {
-        const string text = "ab";
-        var engine = new CorrectionEngine();
-        var result = engine.Apply(text, engine.Annotate(text), [Match(0, 1, "", 0), Match(1, 1, "", 1)]);
-
-        Assert.NotEmpty(result.CorrectedText);
-        Assert.Single(result.Corrections);
-    }
-
-    [Fact]
-    public void LanguageToolIgnoresOverflowingProviderOffsets()
-    {
-        var engine = new CorrectionEngine();
-        var result = engine.Apply("Text", engine.Annotate("Text"), [Match(int.MaxValue, int.MaxValue, "", 0)]);
-
-        Assert.Equal("Text", result.CorrectedText);
-        Assert.Empty(result.Corrections);
-    }
-
     [Theory]
     [InlineData("")]
     [InlineData("- korrekt - Zweiter")]
@@ -155,9 +118,6 @@ public sealed class TextStructureTests
         await Assert.ThrowsAsync<LanguageFixException>(() =>
             provider.CorrectAsync("- korekt", CancellationToken.None));
     }
-
-    private static LanguageToolMatch Match(int offset, int length, string replacement, int index) =>
-        new(offset, length, [replacement], $"RULE_{index}", "TEST", "test", 0.5, index);
 
     private sealed class ResponseClient(string output) : ICodexAppServerClient, IStructuredCodexCorrectionClient
     {

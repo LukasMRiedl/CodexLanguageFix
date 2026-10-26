@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
 using CodexLanguageFix.Infrastructure;
 using Xunit.Abstractions;
@@ -27,87 +26,41 @@ public sealed class LiveFormatRegressionTests(ITestOutputHelper output)
     ];
 
     [Fact]
-    public async Task RealProviders_PreserveTwelveRepresentativeFormats()
+    public async Task Codex_PreservesTwelveRepresentativeFormats()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_FORMAT_LIVE_TEST") != "1")
             return;
 
         var localizer = new AppLocalizer("de");
-        using var lunaClient = new CodexAppServerClient(
-            LunaLiveRuntime.CreateDirectory(), localizer);
-        string? lunaUnavailable = null;
-        string? selectedLunaModel = null;
-        try
-        {
-            if (!(await lunaClient.GetAccountAsync(CancellationToken.None)).IsChatGpt)
-                lunaUnavailable = "ChatGPT-OAuth unavailable";
-            else
-            {
-                var selection = await lunaClient.ResolveLunaProfileAsync(CancellationToken.None);
-                if (selection.Effort != "low" || selection.ServiceTier != "priority")
-                    lunaUnavailable = "production Luna/low/priority capability unavailable";
-                else
-                    selectedLunaModel = selection.Model;
-            }
-        }
-        catch (Exception exception)
-        {
-            lunaUnavailable = exception.GetType().Name;
-        }
-        using var languageToolClient = new LanguageToolClient(localizer: localizer);
-        var engine = new CorrectionEngine();
-        ICorrectionProvider[] providers =
-        [
-            new LanguageToolCorrectionProvider(languageToolClient, engine),
-            new LunaCorrectionProvider(lunaClient, localizer, cacheEnabled: false)
-        ];
+        using var client = new CodexAppServerClient(LunaLiveRuntime.CreateDirectory(), localizer);
+        Assert.True((await client.GetAccountAsync(CancellationToken.None)).IsChatGpt,
+            "Für den Codex-Live-Test ist eine ChatGPT-Anmeldung erforderlich.");
+        var selection = await client.ResolveLunaProfileAsync(CancellationToken.None);
+        Assert.Equal("low", selection.Effort);
+        Assert.Equal("priority", selection.ServiceTier);
+        var provider = new LunaCorrectionProvider(client, localizer, cacheEnabled: false);
         var failures = new List<string>();
-        var sinceLanguageToolStart = Stopwatch.StartNew();
-        var hasStartedLanguageTool = false;
         foreach (var testCase in Cases)
         {
-            // Keep public LanguageTool starts at least 3.1 seconds apart (under 20/minute).
-            if (hasStartedLanguageTool)
+            var timer = Stopwatch.StartNew();
+            try
             {
-                var remaining = TimeSpan.FromSeconds(3.1) - sinceLanguageToolStart.Elapsed;
-                if (remaining > TimeSpan.Zero)
-                    await Task.Delay(remaining);
+                var result = await provider.CorrectAsync(testCase.Original, CancellationToken.None);
+                var structure = TextStructure.IsPreserved(testCase.Original, result.CorrectedText);
+                var accepted = string.Equals(testCase.Expected, result.CorrectedText, StringComparison.Ordinal);
+                var profileMatches = result.LunaExecution is { } execution
+                    && execution.Model == selection.Model
+                    && execution.Effort == "low"
+                    && execution.ServiceTier == "priority";
+                if (!structure || !accepted || !profileMatches)
+                    failures.Add($"Codex/{testCase.Id}: structure={structure}, accepted={accepted}, profile={profileMatches}");
+                output.WriteLine($"Codex/{testCase.Id}: {timer.Elapsed.TotalMilliseconds:F0} ms, passed={structure && accepted && profileMatches}");
             }
-            sinceLanguageToolStart.Restart();
-            hasStartedLanguageTool = true;
-            var observations = await Task.WhenAll(providers.Select(async provider =>
+            catch (Exception exception)
             {
-                var timer = Stopwatch.StartNew();
-                try
-                {
-                    if (provider.Kind == CorrectionProviderKind.Luna && lunaUnavailable is not null)
-                        return (provider.Kind, timer.Elapsed, Failure: $"Luna/{testCase.Id}: not executed ({lunaUnavailable})");
-                    var result = await provider.CorrectAsync(testCase.Original, CancellationToken.None);
-                    var structure = TextStructure.IsPreserved(testCase.Original, result.CorrectedText);
-                    var accepted = string.Equals(testCase.Expected, result.CorrectedText, StringComparison.Ordinal);
-                    var profileMatches = provider.Kind != CorrectionProviderKind.Luna
-                        || result.LunaExecution is { } execution
-                           && execution.Model == selectedLunaModel
-                           && execution.Effort == "low"
-                           && execution.ServiceTier == "priority";
-                    // Exact outputs include every protected span, multiplicity, order and control character.
-                    return (provider.Kind, timer.Elapsed, Failure: structure && accepted && profileMatches ? null
-                        : $"{provider.Kind}/{testCase.Id}: structure={structure}, accepted={accepted}, profile={profileMatches}");
-                }
-                catch (Exception exception)
-                {
-                    // These fixtures contain only synthetic text; retain the failing
-                    // validation location without recording a provider response.
-                    output.WriteLine($"{provider.Kind}/{testCase.Id}: {exception}");
-                    return (provider.Kind, timer.Elapsed,
-                        Failure: $"{provider.Kind}/{testCase.Id}: {exception.GetType().Name}");
-                }
-            }));
-            foreach (var observation in observations)
-            {
-                output.WriteLine($"{observation.Kind}/{testCase.Id}: {observation.Elapsed.TotalMilliseconds:F0} ms, passed={observation.Failure is null}");
-                if (observation.Failure is not null)
-                    failures.Add(observation.Failure);
+                // Fixtures contain only synthetic text; never record provider responses.
+                output.WriteLine($"Codex/{testCase.Id}: {exception.GetType().Name}");
+                failures.Add($"Codex/{testCase.Id}: {exception.GetType().Name}");
             }
         }
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));

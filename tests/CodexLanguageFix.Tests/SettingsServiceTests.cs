@@ -6,17 +6,21 @@ namespace CodexLanguageFix.Tests;
 public sealed class SettingsServiceTests
 {
     [Fact]
-    public void ExistingSettingsWithoutProviderOrShortcutKeepTheirDefaults()
+    public void LegacySettingsWithoutProvider_DisablePreparationAndKeepOtherSettings()
     {
         var directory = CreateTemporaryDirectory();
         try
         {
-            File.WriteAllText(Path.Combine(directory, "settings.json"), "{\"enabled\":true,\"language\":\"de\"}");
+            File.WriteAllText(
+                Path.Combine(directory, "settings.json"),
+                """{"enabled":false,"startWithWindows":false,"prepareLunaCorrections":true,"language":"de"}""");
 
             var settings = new SettingsService(directory).Load();
 
-            Assert.Equal(CorrectionProviderKind.LanguageTool, settings.CorrectionProvider);
             Assert.False(settings.PrepareLunaCorrections);
+            Assert.False(settings.Enabled);
+            Assert.False(settings.StartWithWindows);
+            Assert.Equal("de", settings.Language);
             Assert.Equal(CorrectionShortcut.Default.Modifiers, settings.ShortcutModifiers);
             Assert.Equal(CorrectionShortcut.Default.VirtualKey, settings.ShortcutVirtualKey);
             Assert.False(settings.ShortcutResetOnLoad);
@@ -28,16 +32,18 @@ public sealed class SettingsServiceTests
     }
 
     [Fact]
-    public void InvalidProviderFallsBackToLanguageTool()
+    public void LegacyLunaProvider_PreservesPreparationChoice()
     {
         var directory = CreateTemporaryDirectory();
         try
         {
-            File.WriteAllText(Path.Combine(directory, "settings.json"), "{\"correctionProvider\":99}");
+            File.WriteAllText(
+                Path.Combine(directory, "settings.json"),
+                """{"correctionProvider":1,"prepareLunaCorrections":true}""");
 
             var settings = new SettingsService(directory).Load();
 
-            Assert.Equal(CorrectionProviderKind.LanguageTool, settings.CorrectionProvider);
+            Assert.True(settings.PrepareLunaCorrections);
         }
         finally
         {
@@ -46,7 +52,90 @@ public sealed class SettingsServiceTests
     }
 
     [Fact]
-    public void LunaPreparation_IsDisabledByDefaultAndPersistsWhenEnabled()
+    public void LegacyLanguageToolProvider_DisablesPreparationChoice()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "settings.json"),
+                """{"correctionProvider":0,"prepareLunaCorrections":true,"settingsVersion":2}""");
+
+            var settings = new SettingsService(directory).Load();
+
+            Assert.False(settings.PrepareLunaCorrections);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("99")]
+    [InlineData("\"1\"")]
+    [InlineData("null")]
+    public void LegacyInvalidProvider_DisablesPreparationChoice(string providerJson)
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var json = $$"""{"correctionProvider":{{providerJson}},"prepareLunaCorrections":true}""";
+            File.WriteAllText(Path.Combine(directory, "settings.json"), json);
+
+            var settings = new SettingsService(directory).Load();
+
+            Assert.False(settings.PrepareLunaCorrections);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void CurrentSchemaWithoutLegacyProvider_PreservesPreparationChoice()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "settings.json"),
+                """{"settingsVersion":2,"prepareLunaCorrections":true}""");
+
+            var settings = new SettingsService(directory).Load();
+
+            Assert.True(settings.PrepareLunaCorrections);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("""{"prepareLunaCorrections":true}""")]
+    [InlineData("""{"settingsVersion":1,"prepareLunaCorrections":true}""")]
+    [InlineData("""{"settingsVersion":3,"prepareLunaCorrections":true}""")]
+    public void MissingOrUnsupportedSchema_DisablesPreparationChoice(string json)
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "settings.json"), json);
+
+            var settings = new SettingsService(directory).Load();
+
+            Assert.False(settings.PrepareLunaCorrections);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void PreparationChoice_RoundTripsInCurrentSchemaWithoutLegacyProvider()
     {
         var directory = CreateTemporaryDirectory();
         try
@@ -54,9 +143,17 @@ public sealed class SettingsServiceTests
             var service = new SettingsService(directory);
             Assert.False(service.Load().PrepareLunaCorrections);
 
-            service.Save(new AppSettings { PrepareLunaCorrections = true });
+            service.Save(new AppSettings { PrepareLunaCorrections = true, Language = "de" });
 
-            Assert.True(service.Load().PrepareLunaCorrections);
+            var savedJson = File.ReadAllText(Path.Combine(directory, "settings.json"));
+            Assert.Contains("\"settingsVersion\": 2", savedJson);
+            Assert.DoesNotContain("correctionProvider", savedJson.ToLowerInvariant());
+
+            var loaded = service.Load();
+
+            Assert.True(loaded.PrepareLunaCorrections);
+            Assert.Equal(AppSettings.CurrentSettingsVersion, loaded.SettingsVersion);
+            Assert.Equal("de", loaded.Language);
         }
         finally
         {
@@ -101,7 +198,7 @@ public sealed class SettingsServiceTests
         {
             File.WriteAllText(
                 Path.Combine(directory, "settings.json"),
-                "{\"shortcutModifiers\":8,\"shortcutVirtualKey\":65}");
+                """{"settingsVersion":2,"shortcutModifiers":8,"shortcutVirtualKey":65}""");
 
             var settings = new SettingsService(directory).Load();
 

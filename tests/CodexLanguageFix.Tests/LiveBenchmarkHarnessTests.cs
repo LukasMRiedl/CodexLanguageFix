@@ -35,10 +35,8 @@ public sealed class LiveBenchmarkHarnessTests
             3,
             42,
             true,
-            false,
             120,
             0,
-            null,
             null,
             null);
 
@@ -60,10 +58,8 @@ public sealed class LiveBenchmarkHarnessTests
             2,
             42,
             true,
-            false,
             120,
             0,
-            null,
             null,
             null)
         {
@@ -95,7 +91,6 @@ public sealed class LiveBenchmarkHarnessTests
         Assert.Equal([4, 8, 2, 8], LiveBenchmarkStagePlan.Definitions.Select(item => item.CaseIds.Count));
         Assert.True(LiveBenchmarkStagePlan.Definitions[2].UsesLongCases);
         Assert.True(LiveBenchmarkStagePlan.Definitions[3].UsesLongCases);
-        Assert.Equal(8, LiveBenchmarkStagePlan.LanguageToolCaseIds.Count);
     }
 
     [Fact]
@@ -105,7 +100,7 @@ public sealed class LiveBenchmarkHarnessTests
 
         Assert.Equal([60, 24, 36, 16], matrixMeasurements);
         Assert.Equal(136, matrixMeasurements.Sum());
-        Assert.Equal(147, matrixMeasurements.Sum() + 8 + 3); // Providervergleich + drei Capability-Prüfungen
+        Assert.Equal(139, matrixMeasurements.Sum() + 3); // Drei Capability-Prüfungen
     }
 
     [Fact]
@@ -246,26 +241,9 @@ public sealed class LiveBenchmarkHarnessTests
     }
 
     [Fact]
-    public void ProviderComparisonSelection_IsBilingualAndContainsControlsAndRetentionCases()
-    {
-        var selected = LiveBenchmarkRunner.SelectRepresentativeProviderCases(
-            QualityCorpus.Load(),
-            maximum: 20,
-            seed: 42);
-
-        Assert.Equal(20, selected.Length);
-        Assert.Contains(selected, item => item.Language == "de" && !item.IsControl);
-        Assert.Contains(selected, item => item.Language == "en" && !item.IsControl);
-        Assert.Contains(selected, item => item.Language == "de" && item.IsControl);
-        Assert.Contains(selected, item => item.Language == "en" && item.IsControl);
-        Assert.Contains(selected, item => item.Language == "es" && item.IsControl);
-        Assert.Contains(selected, item => item.Language == "fr" && item.IsControl);
-    }
-
-    [Fact]
     public void ColdStartSelection_RemainsBilingualAndContainsControls()
     {
-        var selected = LiveBenchmarkRunner.SelectRepresentativeProviderCases(
+        var selected = LiveBenchmarkRunner.SelectRepresentativeCases(
             QualityCorpus.Load(),
             maximum: 10,
             seed: 42);
@@ -312,7 +290,7 @@ public sealed class LiveBenchmarkHarnessTests
     }
 
     [Fact]
-    public void HardAssertions_RejectRequestedMissingLanguageToolComparison()
+    public void HardAssertions_RequireOnlyPassingCodexQualityGate()
     {
         var report = new LiveBenchmarkReport(
             3,
@@ -323,13 +301,13 @@ public sealed class LiveBenchmarkHarnessTests
             Path.Combine(Path.GetTempPath(), "report.json"),
             42,
             32,
-            1,
+            0,
             "hash",
             "selected-luna",
             "priority",
             1,
             2,
-            true,
+            false,
             [],
             ["low"],
             [],
@@ -337,59 +315,22 @@ public sealed class LiveBenchmarkHarnessTests
             [],
             [])
         {
-            LanguageToolComparisonRequested = true
+            QualityGates = [new LiveBenchmarkQualityGate(
+                "luna", "candidate", "low", 1, 0, 0.8, 0.8,
+                true, true, true, true, true)]
         };
         var configuration = new LiveBenchmarkConfiguration(
-            ["baseline"],
-            ["low"],
-            32,
-            1,
-            2,
-            42,
-            true,
-            true,
-            120,
-            0,
-            null,
-            null,
-            null)
+            ["baseline"], ["low"], 32, 1, 2, 42,
+            false, 120, 0, null, null)
         {
-            RequirePerformanceGate = false
+            RequirePerformanceGate = true
         };
+
+        LiveBenchmarkHardAssertions.Validate(report, configuration, 0);
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            LiveBenchmarkHardAssertions.Validate(report, configuration, 1));
-
-        Assert.Contains("LanguageTool", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void LanguageToolComparisonCellSelection_SkipsUnsafeLunaCells()
-    {
-        var unsafeCell = Cell("baseline", "low", correctedExact: 6, p95: 300);
-        var unsafeObservation = new LiveBenchmarkObservation(
-            "luna",
-            "baseline",
-            "low",
-            1,
-            "DE001",
-            "de",
-            "spelling",
-            false,
-            true,
-            false,
-            100,
-            90,
-            null)
-        {
-            SafetyCritical = true
-        };
-
-        var comparisonCell = LiveBenchmarkRunner.SelectSafeLanguageToolComparisonCell(
-            [unsafeCell],
-            [unsafeObservation]);
-
-        Assert.Null(comparisonCell);
+            LiveBenchmarkHardAssertions.Validate(report with { QualityGates = [] }, configuration, 0));
+        Assert.Contains("Keine finale Luna-Zelle", exception.Message, StringComparison.Ordinal);
     }
 
     private static LiveBenchmarkCellReport Cell(

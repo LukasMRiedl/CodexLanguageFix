@@ -6,14 +6,14 @@ namespace CodexLanguageFix.Tests;
 public sealed class LocalizationTests
 {
     [Theory]
-    [InlineData("de", "Aktiviert", "Wird geprüft …", "Rückgängig", "Luna-Korrekturen vorbereiten", "Korrektur bereit")]
-    [InlineData("en", "Enabled", "Checking …", "Undo", "Prepare Luna corrections", "Correction ready")]
+    [InlineData("de", "Aktiviert", "Wird geprüft …", "Rückgängig", "Codex-Korrekturen vorbereiten", "Korrektur bereit")]
+    [InlineData("en", "Enabled", "Checking …", "Undo", "Prepare Codex corrections", "Correction ready")]
     public void ExplicitLanguage_ProvidesCompleteVisibleText(
         string language,
         string enabled,
         string checking,
         string undo,
-        string prepareLunaCorrections,
+        string prepareCorrections,
         string correctionReady)
     {
         var localizer = new AppLocalizer(language);
@@ -21,7 +21,7 @@ public sealed class LocalizationTests
         Assert.Equal(enabled, localizer.Get(AppText.Enabled));
         Assert.Equal(checking, localizer.Get(AppText.Checking));
         Assert.Equal(undo, localizer.Get(AppText.Undo));
-        Assert.Equal(prepareLunaCorrections, localizer.Get(AppText.PrepareLunaCorrections));
+        Assert.Equal(prepareCorrections, localizer.Get(AppText.PrepareLunaCorrections));
         Assert.Equal(correctionReady, localizer.Get(AppText.CorrectionReady));
         Assert.All(Enum.GetValues<AppText>(), key => Assert.False(string.IsNullOrWhiteSpace(localizer.Get(key))));
     }
@@ -29,17 +29,33 @@ public sealed class LocalizationTests
     [Theory]
     [InlineData("de", "1,2 Sekunden", "manuell", "ausgeschaltet")]
     [InlineData("en", "1.2 seconds", "manually", "off")]
-    public void FirstRunPrivacy_ExplainsOptInLunaPreparation(
+    public void FirstRunPrivacy_ExplainsOptInCodexPreparation(
         string language,
         string stabilityDelay,
         string manualInsertion,
         string disabledByDefault)
     {
-        var privacyText = new AppLocalizer(language).Get(AppText.FirstRunPrivacy);
+        var localizer = new AppLocalizer(language);
+        var privacyText = localizer.Get(AppText.FirstRunPrivacy);
 
         Assert.Contains(stabilityDelay, privacyText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(manualInsertion, privacyText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(disabledByDefault, privacyText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Codex", privacyText, StringComparison.OrdinalIgnoreCase);
+        Assert.False(privacyText.Contains("LanguageTool", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Codex", localizer.Get(AppText.FirstRunExplanation), StringComparison.OrdinalIgnoreCase);
+        Assert.False(localizer.Get(AppText.FirstRunExplanation).Contains("LanguageTool", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("de", "Codex-Verbindung prüfen", "Mit Codex verbinden")]
+    [InlineData("en", "Test Codex connection", "Connect to Codex")]
+    public void ConnectionMenu_UsesDirectCodexLabels(string language, string testConnection, string connect)
+    {
+        var localizer = new AppLocalizer(language);
+
+        Assert.Equal(testConnection, localizer.Get(AppText.TestConnection));
+        Assert.Equal(connect, localizer.Get(AppText.ConnectOpenAi));
     }
 
     [Theory]

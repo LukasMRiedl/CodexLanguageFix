@@ -191,7 +191,6 @@ internal static class Program
                 StartWithWindows = false,
                 FirstRunNoticeShown = true,
                 Language = AppLocalizer.German,
-                CorrectionProvider = CorrectionProviderKind.Luna
             };
             if (preparationEnabled && !SetOptionalBooleanProperty(settings, "PrepareLunaCorrections", false))
                 throw new ProbeException("preparation_setting_unavailable", ProbeFailureExitCode);
@@ -204,7 +203,7 @@ internal static class Program
             var logPath = Path.Combine(_dataDirectory!, "logs", $"diagnostic-{DateTime.Now:yyyy-MM-dd}.jsonl");
             var diagnosticsStartedAt = DateTimeOffset.Now;
             _coordinator = new CorrectionCoordinator(_composer,
-                [_provider], _provider, _overlay, _tray, _logger, _dispatcher, _localizer);
+                _provider, _provider, _overlay, _tray, _logger, _dispatcher, _localizer);
             ((AutomationElement)initial.NativeElement).SetFocus();
             _coordinator.Start();
             if (LogHasEvent(Path.Combine(_dataDirectory!, "logs", $"diagnostic-{DateTime.Now:yyyy-MM-dd}.jsonl"), "shortcut_registration_failed"))

@@ -9,8 +9,9 @@ namespace CodexLanguageFix.Core;
 
 public sealed class CorrectionCoordinator : IDisposable
 {
+    private const string ProviderDisplayName = "Codex";
     private readonly IComposerAccessor _composerAccessor;
-    private readonly IReadOnlyDictionary<CorrectionProviderKind, ICorrectionProvider> _providers;
+    private readonly ICorrectionProvider _provider;
     private readonly IOpenAiConnection _openAiConnection;
     private readonly OverlayWindow _overlay;
     private readonly TrayController _tray;
@@ -36,7 +37,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
     public CorrectionCoordinator(
         IComposerAccessor composerAccessor,
-        IEnumerable<ICorrectionProvider> providers,
+        ICorrectionProvider provider,
         IOpenAiConnection openAiConnection,
         OverlayWindow overlay,
         TrayController tray,
@@ -45,15 +46,15 @@ public sealed class CorrectionCoordinator : IDisposable
         AppLocalizer localizer)
     {
         _composerAccessor = composerAccessor;
-        _providers = providers.ToDictionary(provider => provider.Kind);
+        _provider = provider;
         _openAiConnection = openAiConnection;
         _overlay = overlay;
         _tray = tray;
         _logger = logger;
         _localizer = localizer;
-        _preparation = new CorrectionPreparation(_providers[CorrectionProviderKind.Luna]);
+        _preparation = new CorrectionPreparation(_provider);
         _preparation.Diagnostic += (eventName, length, elapsed) =>
-            _logger.Write(eventName, length, elapsedMilliseconds: elapsed.TotalMilliseconds, provider: CorrectionProviderKind.Luna);
+            _logger.Write(eventName, length, elapsedMilliseconds: elapsed.TotalMilliseconds, provider: _provider.Kind);
         _hotkey = new CorrectionHotkey();
         _hotkey.SetShortcut(_tray.Shortcut);
         _overlay.SetShortcut(_tray.Shortcut);
@@ -66,7 +67,6 @@ public sealed class CorrectionCoordinator : IDisposable
         _tray.EnabledChanged += (_, _) => { _requestCancellation?.Cancel(); RefreshOverlay(); };
         _tray.ConnectionTestRequested += async (_, _) => await TestConnectionAsync();
         _tray.ConnectOpenAiRequested += async (_, _) => await ConnectOpenAiAsync();
-        _tray.ProviderChanged += Tray_OnProviderChanged;
         _tray.PreparationChanged += Tray_OnPreparationChanged;
         _tray.SettingsRequested += Tray_OnSettingsRequested;
         _tray.LastStatusChanged += Tray_OnLastStatusChanged;
@@ -138,7 +138,7 @@ public sealed class CorrectionCoordinator : IDisposable
         _visibleSnapshot = snapshot;
         var shortcutEligible = _composerAccessor is CodexComposerAccessor { LastCaptureWasKeyboardFocused: true };
         _preparation.Observe(snapshot,
-            shortcutEligible && _tray.PrepareLunaCorrections && _tray.CurrentProvider == CorrectionProviderKind.Luna,
+            shortcutEligible && _tray.PrepareLunaCorrections,
             allowStart: !_busy);
         if (!_hotkey.SetEnabled(shortcutEligible) && !_shortcutFailureReported)
         {
@@ -155,7 +155,7 @@ public sealed class CorrectionCoordinator : IDisposable
 
         var message = DateTimeOffset.UtcNow < _transientUntil ? _transientMessage : null;
         _overlay.ShowStatus(message ?? (_busy ? _localizer.Get(AppText.Checking)
-            : canUndo ? FormatChangeCount(_undo!.ChangeCount, _undo.Provider, _localizer)
+            : canUndo ? FormatChangeCount(_undo!.ChangeCount, _localizer)
             : _preparation.IsReady(snapshot) ? _localizer.Get(AppText.CorrectionReady) : null), canUndo && !_busy);
         PositionOverlay(snapshot);
     }
@@ -190,17 +190,16 @@ public sealed class CorrectionCoordinator : IDisposable
         _overlay.ShowStatus(_localizer.Get(AppText.Checking));
         _requestCancellation = new CancellationTokenSource();
         var requestCancellation = _requestCancellation;
-        var requestProvider = GetCurrentProvider();
+        var provider = _provider;
         var commandStatus = "failed";
         try
         {
-            var provider = requestProvider;
             _logger.Write("correction_capture_completed", snapshot.Text.Length,
                 elapsedMilliseconds: captureStopwatch.Elapsed.TotalMilliseconds, provider: provider.Kind);
             _logger.Write("check_started", snapshot.Text.Length, provider: provider.Kind);
             var providerStopwatch = Stopwatch.StartNew();
             var prepared = _preparation.BeginManual(snapshot);
-            if (provider.Kind == CorrectionProviderKind.Luna && prepared is not null)
+            if (prepared is not null)
             {
                 var preparationSucceeded = await prepared.WaitAsync(requestCancellation.Token);
                 _logger.Write(preparationSucceeded ? "preparation_adopted" : "preparation_unavailable",
@@ -222,9 +221,7 @@ public sealed class CorrectionCoordinator : IDisposable
             {
                 commandStatus = "unchanged";
                 commandStopwatch.Stop();
-                ShowTransient(provider.Kind == CorrectionProviderKind.Luna
-                    ? _localizer.Get(AppText.NoChangesFoundProvider, ProviderName(provider.Kind))
-                    : _localizer.Get(AppText.NoChangesFound), snapshot);
+                ShowTransient(_localizer.Get(AppText.NoChangesFoundProvider, ProviderDisplayName), snapshot);
                 return;
             }
 
@@ -280,13 +277,13 @@ public sealed class CorrectionCoordinator : IDisposable
                 composerStopwatch.Elapsed.TotalMilliseconds,
                 provider.Kind);
 
-            _undo = new UndoState(current, snapshot.Text, outcome.CorrectedText, outcome.ChangeCount, outcome.Provider);
-            _overlay.ShowStatus(FormatChangeCount(outcome.ChangeCount, outcome.Provider, _localizer), true);
+            _undo = new UndoState(current, snapshot.Text, outcome.CorrectedText, outcome.ChangeCount);
+            _overlay.ShowStatus(FormatChangeCount(outcome.ChangeCount, _localizer), true);
             _tray.SetStatus(
                 _localizer.Get(AppText.PromptCorrected),
                 outcome.ChangeCount == 1
-                    ? _localizer.Get(AppText.CorrectionAppliedOne, ProviderName(outcome.Provider))
-                    : _localizer.Get(AppText.CorrectionsAppliedMany, outcome.ChangeCount, ProviderName(outcome.Provider)));
+                    ? _localizer.Get(AppText.CorrectionAppliedOne, ProviderDisplayName)
+                    : _localizer.Get(AppText.CorrectionsAppliedMany, outcome.ChangeCount, ProviderDisplayName));
         }
         catch (OperationCanceledException)
         {
@@ -314,7 +311,7 @@ public sealed class CorrectionCoordinator : IDisposable
         finally
         {
             _logger.Write("correction_command_completed", snapshot.Text.Length,
-                elapsedMilliseconds: commandStopwatch.Elapsed.TotalMilliseconds, provider: requestProvider.Kind,
+                elapsedMilliseconds: commandStopwatch.Elapsed.TotalMilliseconds, provider: provider.Kind,
                 reason: $"{(fromShortcut ? "shortcut" : "button")}_{commandStatus}");
             requestCancellation.Dispose();
             _requestCancellation = null;
@@ -362,10 +359,9 @@ public sealed class CorrectionCoordinator : IDisposable
     {
         try
         {
-            var provider = GetCurrentProvider();
-            var result = await provider.TestAsync(CancellationToken.None);
+            var result = await _provider.TestAsync(CancellationToken.None);
             _tray.SetStatus(
-                _localizer.Get(AppText.ProviderAvailable, ProviderName(provider.Kind)),
+                _localizer.Get(AppText.ProviderAvailable, ProviderDisplayName),
                 _localizer.Get(AppText.ResponseTime, result.Elapsed.TotalMilliseconds));
         }
         catch (LanguageFixException exception)
@@ -383,7 +379,7 @@ public sealed class CorrectionCoordinator : IDisposable
         try
         {
             await _openAiConnection.ConnectAsync(CancellationToken.None);
-            _tray.SetStatus(_localizer.Get(AppText.OpenAiConnected), _localizer.Get(AppText.ProviderAvailable, ProviderName(CorrectionProviderKind.Luna)));
+            _tray.SetStatus(_localizer.Get(AppText.OpenAiConnected), _localizer.Get(AppText.ProviderAvailable, ProviderDisplayName));
         }
         catch (LanguageFixException exception)
         {
@@ -392,27 +388,6 @@ public sealed class CorrectionCoordinator : IDisposable
         catch (Exception)
         {
             _tray.SetStatus(_localizer.Get(AppText.CorrectionUnavailable), _localizer.Get(AppText.UnexpectedConnectionFailure));
-        }
-    }
-
-    private async void Tray_OnProviderChanged(object? sender, EventArgs e)
-    {
-        _preparation.Clear();
-        _requestCancellation?.Cancel();
-        RefreshOverlay();
-        if (_tray.CurrentProvider != CorrectionProviderKind.Luna)
-        {
-            return;
-        }
-
-        try
-        {
-            await _openAiConnection.WarmUpAsync(CancellationToken.None);
-            _logger.Write("luna_warmup_completed", provider: CorrectionProviderKind.Luna);
-        }
-        catch (Exception)
-        {
-            _logger.Write("luna_warmup_failed", provider: CorrectionProviderKind.Luna);
         }
     }
 
@@ -474,20 +449,6 @@ public sealed class CorrectionCoordinator : IDisposable
     private void Tray_OnLastStatusChanged(object? sender, EventArgs e) =>
         _settingsWindow?.UpdateStatus(_tray.LastStatus);
 
-    private ICorrectionProvider GetCurrentProvider()
-    {
-        if (_providers.TryGetValue(_tray.CurrentProvider, out var provider))
-        {
-            return provider;
-        }
-
-        return _providers[CorrectionProviderKind.LanguageTool];
-    }
-
-    private string ProviderName(CorrectionProviderKind provider) => provider == CorrectionProviderKind.Luna
-        ? "Luna"
-        : _localizer.Get(AppText.ProviderLanguageTool);
-
     private void ShowTransient(string message, ComposerSnapshot? origin = null)
     {
         if (_disposed) return;
@@ -533,16 +494,13 @@ public sealed class CorrectionCoordinator : IDisposable
         RefreshOverlay();
     }
 
-    internal static string FormatChangeCount(int count, CorrectionProviderKind provider, AppLocalizer localizer)
+    internal static string FormatChangeCount(int count, AppLocalizer localizer)
     {
         var value = count == 1
             ? localizer.Get(AppText.ChangeCountOne)
             : localizer.Get(AppText.ChangeCountMany, count);
-        return provider == CorrectionProviderKind.Luna ? $"{value} · Luna" : value;
+        return $"{value} · {ProviderDisplayName}";
     }
-
-    internal static string FormatChangeCount(int count, AppLocalizer localizer) =>
-        FormatChangeCount(count, CorrectionProviderKind.LanguageTool, localizer);
 
     public void Dispose()
     {
@@ -558,7 +516,6 @@ public sealed class CorrectionCoordinator : IDisposable
         _visibleSnapshot = null;
         _requestSnapshot = null;
         _undo = null;
-        _tray.ProviderChanged -= Tray_OnProviderChanged;
         _tray.PreparationChanged -= Tray_OnPreparationChanged;
         _tray.SettingsRequested -= Tray_OnSettingsRequested;
         _tray.LastStatusChanged -= Tray_OnLastStatusChanged;
@@ -571,6 +528,5 @@ public sealed class CorrectionCoordinator : IDisposable
         ComposerSnapshot Snapshot,
         string Original,
         string Corrected,
-        int ChangeCount,
-        CorrectionProviderKind Provider);
+        int ChangeCount);
 }

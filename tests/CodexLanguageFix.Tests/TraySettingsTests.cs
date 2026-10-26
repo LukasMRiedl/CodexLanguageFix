@@ -33,6 +33,39 @@ public sealed class TraySettingsTests
     }
 
     [Fact]
+    public void CodexConnectionCommandsAreDirectMenuItems()
+    {
+        RunSta(() =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "CodexLanguageFix.Tests", Guid.NewGuid().ToString("N"));
+            try
+            {
+                var localizer = new AppLocalizer("de");
+                using var tray = new TrayController(new AppSettings(), new SettingsService(folder), new AutostartService(localizer), localizer);
+                HideIcon(tray);
+                var icon = (System.Windows.Forms.NotifyIcon)typeof(TrayController)
+                    .GetField("_notifyIcon", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(tray)!;
+                var menu = icon.ContextMenuStrip!;
+                var connect = menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>()
+                    .Single(item => item.Text == localizer.Get(AppText.ConnectOpenAi));
+                var check = menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>()
+                    .Single(item => item.Text == localizer.Get(AppText.TestConnection));
+                Assert.Empty(connect.DropDownItems);
+                Assert.Empty(check.DropDownItems);
+                var connectRequests = 0;
+                var checkRequests = 0;
+                tray.ConnectOpenAiRequested += (_, _) => connectRequests++;
+                tray.ConnectionTestRequested += (_, _) => checkRequests++;
+                connect.PerformClick();
+                check.PerformClick();
+                Assert.Equal(1, connectRequests);
+                Assert.Equal(1, checkRequests);
+            }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        });
+    }
+
+    [Fact]
     public void FailedSettingsWriteRetainsPreviousShortcutAndDoesNotChangeSavedData()
     {
         RunSta(() =>
@@ -65,7 +98,7 @@ public sealed class TraySettingsTests
             try
             {
                 var localizer = new AppLocalizer("en");
-                var settings = new AppSettings { CorrectionProvider = CorrectionProviderKind.Luna, PrepareLunaCorrections = true, ShortcutResetOnLoad = true };
+                var settings = new AppSettings { PrepareLunaCorrections = true, ShortcutResetOnLoad = true };
                 var service = new SettingsService(folder);
                 using var tray = new TrayController(settings, service, new AutostartService(localizer), localizer);
                 HideIcon(tray);
@@ -74,7 +107,6 @@ public sealed class TraySettingsTests
                 tray.SaveShortcut(shortcut);
                 var loaded = service.Load();
                 Assert.Equal(shortcut, new CorrectionShortcut(loaded.ShortcutModifiers, loaded.ShortcutVirtualKey));
-                Assert.Equal(CorrectionProviderKind.Luna, loaded.CorrectionProvider);
                 Assert.True(loaded.PrepareLunaCorrections);
             }
             finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }

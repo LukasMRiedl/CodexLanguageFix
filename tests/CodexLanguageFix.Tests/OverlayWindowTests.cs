@@ -25,21 +25,13 @@ public sealed class OverlayWindowTests
     }
 
     [Theory]
-    [InlineData("de", 1, "1 Änderung")]
-    [InlineData("de", 2, "2 Änderungen")]
-    [InlineData("en", 1, "1 change")]
-    [InlineData("en", 2, "2 changes")]
+    [InlineData("de", 1, "1 Änderung · Codex")]
+    [InlineData("de", 2, "2 Änderungen · Codex")]
+    [InlineData("en", 1, "1 change · Codex")]
+    [InlineData("en", 2, "2 changes · Codex")]
     public void ChangeCount_UsesSelectedLanguage(string language, int count, string expected)
     {
         Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count, new AppLocalizer(language)));
-    }
-
-    [Theory]
-    [InlineData("de", 1, "1 Änderung · Luna")]
-    [InlineData("en", 2, "2 changes · Luna")]
-    public void LunaChangeCount_IncludesProvider(string language, int count, string expected)
-    {
-        Assert.Equal(expected, CorrectionCoordinator.FormatChangeCount(count, CorrectionProviderKind.Luna, new AppLocalizer(language)));
     }
 
     [Fact]

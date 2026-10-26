@@ -12,7 +12,6 @@ public partial class App : System.Windows.Application
     private DiagnosticLogger? _logger;
     private string _exitReason = "runtime_exit";
     private Mutex? _singleInstanceMutex;
-    private LanguageToolClient? _languageToolClient;
     private CodexAppServerClient? _codexAppServerClient;
     private TrayController? _tray;
     private CorrectionCoordinator? _coordinator;
@@ -65,14 +64,8 @@ public partial class App : System.Windows.Application
             }
         }
 
-        _languageToolClient = new LanguageToolClient(localizer: localizer);
         _codexAppServerClient = new CodexAppServerClient(settingsService.ApplicationDirectory, localizer);
-        if (settings.CorrectionProvider == CorrectionProviderKind.Luna)
-        {
-            _ = WarmUpLunaAsync(_codexAppServerClient, logger);
-        }
-        var correctionEngine = new CorrectionEngine();
-        var languageToolProvider = new LanguageToolCorrectionProvider(_languageToolClient, correctionEngine);
+        _ = WarmUpLunaAsync(_codexAppServerClient, logger);
         var lunaProvider = new LunaCorrectionProvider(_codexAppServerClient, localizer);
         _tray = new TrayController(settings, settingsService, autostartService, localizer);
         var overlay = new OverlayWindow(localizer);
@@ -80,7 +73,7 @@ public partial class App : System.Windows.Application
         _memoryDiagnostics = new MemoryDiagnostics(composerAccessor);
         _coordinator = new CorrectionCoordinator(
             composerAccessor,
-            [languageToolProvider, lunaProvider],
+            lunaProvider,
             lunaProvider,
             overlay,
             _tray,
@@ -101,7 +94,6 @@ public partial class App : System.Windows.Application
         _coordinator?.Dispose();
         _memoryDiagnostics?.Dispose();
         _tray?.Dispose();
-        _languageToolClient?.Dispose();
         _codexAppServerClient?.Dispose();
         if (_singleInstanceMutex is not null)
         {

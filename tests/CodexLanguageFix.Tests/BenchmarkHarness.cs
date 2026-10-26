@@ -68,12 +68,10 @@ internal sealed record LiveBenchmarkConfiguration(
     int Parallelism,
     int Seed,
     bool Warmup,
-    bool CompareLanguageTool,
     int TimeoutSeconds,
     int MinimumCorrectedExact,
     string? ReportPath,
-    IReadOnlySet<string>? SelectedCaseIds,
-    IReadOnlySet<string>? LanguageToolCaseIds)
+    IReadOnlySet<string>? SelectedCaseIds)
 {
     // Die Standardausführung des opt-in-Livetests sucht automatisch in drei
     // Stufen. Unit-Tests und gezielte Einzelmessungen können diese Orchestrierung
@@ -84,21 +82,12 @@ internal sealed record LiveBenchmarkConfiguration(
 
     public IReadOnlyList<LiveBenchmarkCell>? SelectedCells { get; init; }
 
-    public int LanguageToolRepetitions { get; init; } = 3;
-
-    public int LanguageToolMaxStartsPerMinute { get; init; } = 20;
-
     /// <summary>
     /// Ausgabeprotokolle, die zusätzlich zum Volltextpfad gemessen werden.
     /// Die Voreinstellung bleibt absichtlich beim produktiven Volltextpfad;
     /// die Protokollmatrix wird opt-in über die Umgebungsvariable aktiviert.
     /// </summary>
     public IReadOnlyList<string> Protocols { get; init; } = [LiveBenchmarkProtocols.Full];
-
-    /// <summary>Warme Provider-Vergleiche verwenden standardmäßig drei Runden mit 20 Fällen.</summary>
-    public int WarmLanguageToolRounds { get; init; } = 3;
-
-    public int WarmLanguageToolCases { get; init; } = 20;
 
     /// <summary>Kaltstarts werden mit einem neu erzeugten App-Server-Client gemessen.</summary>
     public int ColdStartCount { get; init; } = 10;
@@ -140,20 +129,14 @@ internal sealed record LiveBenchmarkConfiguration(
             ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_PARALLELISM", 2, 1, 4),
             ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_SEED", 42, int.MinValue, int.MaxValue),
             ReadBool("CODEX_LANGUAGE_FIX_BENCHMARK_WARMUP", true),
-            ReadBool(
-                "CODEX_LANGUAGE_FIX_BENCHMARK_COMPARE_LANGUAGETOOL",
-                ReadBool("CODEX_LANGUAGE_FIX_BENCHMARK_LANGUAGETOOL", false)),
             ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_TIMEOUT_SECONDS", 120, 1, 600),
             ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_MIN_CORRECTED_EXACT", 0, 0, int.MaxValue),
             Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_BENCHMARK_REPORT"),
-            ReadSet("CODEX_LANGUAGE_FIX_BENCHMARK_CASES"),
-            ReadSet("CODEX_LANGUAGE_FIX_BENCHMARK_LANGUAGETOOL_CASES"))
+            ReadSet("CODEX_LANGUAGE_FIX_BENCHMARK_CASES"))
         {
             AutomaticSearch = ReadBool("CODEX_LANGUAGE_FIX_BENCHMARK_AUTO_SEARCH", true),
             RequirePerformanceGate = ReadBool("CODEX_LANGUAGE_FIX_BENCHMARK_REQUIRE_PERFORMANCE_GATE", true),
             Protocols = ReadProtocols(),
-            WarmLanguageToolRounds = ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_WARM_ROUNDS", 3, 1, 3),
-            WarmLanguageToolCases = ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_WARM_CASES", 20, 1, 20),
             ColdStartCount = ReadInt("CODEX_LANGUAGE_FIX_BENCHMARK_COLD_STARTS", 10, 0, 10),
             ContentlessSchemaWarmup = ReadBool("CODEX_LANGUAGE_FIX_BENCHMARK_SCHEMA_WARMUP", true)
         };
@@ -664,29 +647,6 @@ internal sealed record LiveBenchmarkQualityGate(
     public double? P95RatioUpper95 { get; init; }
 }
 
-internal sealed record LiveBenchmarkProviderComparison(
-    string Provider,
-    string BaselineProvider,
-    int PairedCases,
-    int PairedRepetitions,
-    double LunaF05,
-    double LanguageToolF05,
-    double? P50Ratio,
-    double? P95Ratio,
-    bool QualityNonInferior,
-    bool Faster,
-    double ConfidenceIntervalWidth,
-    bool Passed)
-{
-    public string Protocol { get; init; } = LiveBenchmarkProtocols.Full;
-
-    public double? QualityDifferenceLower95 { get; init; }
-
-    public double? P50RatioUpper95 { get; init; }
-
-    public double? P95RatioUpper95 { get; init; }
-}
-
 internal sealed record LiveBenchmarkReport(
     int SchemaVersion,
     string RunId,
@@ -718,10 +678,6 @@ internal sealed record LiveBenchmarkReport(
 
     public string WarmupKind { get; init; } = "contentful-prime";
 
-    public int WarmLanguageToolRounds { get; init; }
-
-    public int WarmLanguageToolCases { get; init; }
-
     public int ColdStartCount { get; init; }
 
     public IReadOnlyList<LiveBenchmarkObservation> ColdStartObservations { get; init; } = [];
@@ -730,8 +686,6 @@ internal sealed record LiveBenchmarkReport(
 
     public IReadOnlyList<LiveBenchmarkCorpusSource> LicensedCorpusSources { get; init; } = [];
 
-    public bool LanguageToolComparisonRequested { get; init; }
-
     public string Temperature { get; init; } = "warm";
 
     public IReadOnlyList<LiveBenchmarkSkippedCell> SkippedCells { get; init; } = [];
@@ -739,8 +693,6 @@ internal sealed record LiveBenchmarkReport(
     public IReadOnlyList<LiveBenchmarkStageSummary> Stages { get; init; } = [];
 
     public IReadOnlyList<LiveBenchmarkQualityGate> QualityGates { get; init; } = [];
-
-    public LiveBenchmarkProviderComparison? LanguageToolComparison { get; init; }
 
     public int TargetLiveDurationMinutes { get; init; } = 20;
 
@@ -770,9 +722,6 @@ internal static class LiveBenchmarkStagePlan
         new(3, 2, 1, 1, ["LONG-DEEN-0900", "LONG-DEEN-2400"], UsesLongCases: true),
         new(4, 8, 1, 1, ["DE017", "DE043", "EN017", "EN052", "DE059", "EN057", "LONG-DEEN-0900", "LONG-DEEN-2400"], UsesLongCases: true)
     ];
-
-    public static IReadOnlyList<string> LanguageToolCaseIds { get; } =
-        ["DE017", "DE043", "EN017", "EN052", "DE059", "EN057", "DE026", "EN026"];
 
     public static IReadOnlyList<LiveBenchmarkCell> SelectTopCells(
         LiveBenchmarkReport report,
@@ -1057,34 +1006,11 @@ internal static class LiveBenchmarkRunner
         });
     }
 
-    public static LiveBenchmarkCell? SelectSafeLanguageToolComparisonCell(
-        IReadOnlyList<LiveBenchmarkCellReport> cells,
-        IEnumerable<LiveBenchmarkObservation> observations)
-    {
-        var cell = cells
-            .Where(cell => cell.Provider == "luna"
-                           && cell.Effort is not null
-                           && cell.Errors == 0
-                           && cell.ControlsExact == cell.ControlsTotal
-                           && observations.Where(item => item.Provider == "luna"
-                                                           && item.Variant == cell.Variant
-                                                           && item.Effort == cell.Effort
-                                                           && item.Protocol == cell.Protocol)
-                               .All(item => item.Succeeded && (!item.SafetyCritical || item.Exact)))
-            .OrderByDescending(cell => cell.F05)
-            .ThenBy(cell => cell.P95DurationMs)
-            .ThenBy(cell => cell.P50DurationMs)
-            .ThenBy(cell => LivePromptCatalog.Get(cell.Variant).Instructions.Length)
-            .FirstOrDefault();
-        return cell is null ? null : new LiveBenchmarkCell(cell.Variant, cell.Effort!, cell.Protocol);
-    }
-
     private static async Task<LiveBenchmarkRunResult> RunSingleAsync(
         LiveBenchmarkConfiguration configuration,
         IReadOnlyList<CorpusCase> corpus,
         LiveBenchmarkRuntime runtime,
-        CancellationToken cancellationToken,
-        IReadOnlyList<CorpusCase>? providerComparisonCorpus = null)
+        CancellationToken cancellationToken)
     {
         if (corpus.Count == 0)
         {
@@ -1210,7 +1136,7 @@ internal static class LiveBenchmarkRunner
                 .ThenBy(cell => cell.Effort, StringComparer.Ordinal)
                 .ThenBy(cell => cell.Variant, StringComparer.Ordinal)
                 .First();
-            var coldCases = SelectRepresentativeProviderCases(
+            var coldCases = SelectRepresentativeCases(
                     corpus,
                     Math.Min(configuration.ColdStartCount, 20),
                     configuration.Seed + 91_771)
@@ -1241,25 +1167,6 @@ internal static class LiveBenchmarkRunner
                     inFlight,
                     cancellationToken).ConfigureAwait(false);
                 coldStarts.Add(coldResult with { ColdStart = true, WarmupKind = "cold-start" });
-            }
-        }
-
-        if (configuration.CompareLanguageTool)
-        {
-            var comparisonCell = SelectSafeLanguageToolComparisonCell(
-                BuildCellReports(observations, warmups, configuration),
-                observations.ToArray());
-            if (comparisonCell is not null)
-            {
-                await RunLanguageToolComparisonAsync(
-                    providerComparisonCorpus ?? corpus,
-                    configuration,
-                    client,
-                    localizer,
-                    comparisonCell,
-                    observations,
-                    inFlight,
-                    cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -1300,25 +1207,16 @@ internal static class LiveBenchmarkRunner
             Commit = ResolveCommit(),
             Protocols = configuration.Protocols.Select(LiveBenchmarkProtocols.Normalize).Distinct(StringComparer.Ordinal).ToArray(),
             WarmupKind = configuration.ContentlessSchemaWarmup ? "contentless-schema+contentful-prime" : "contentful-prime",
-            WarmLanguageToolRounds = configuration.WarmLanguageToolRounds,
-            WarmLanguageToolCases = configuration.WarmLanguageToolCases,
             ColdStartCount = configuration.ColdStartCount,
             WarmupObservations = warmups.OrderBy(item => item.CaseId, StringComparer.Ordinal).ToArray(),
             ColdStartObservations = coldStarts
                 .OrderBy(item => item.Repetition)
                 .ThenBy(item => item.CaseId, StringComparer.Ordinal)
                 .ToArray(),
-            LicensedCorpusSources = LiveBenchmarkCorpusSelection.LicensedSources(),
-            LanguageToolComparisonRequested = configuration.CompareLanguageTool
+            LicensedCorpusSources = LiveBenchmarkCorpusSelection.LicensedSources()
         };
-        report = report with { LanguageToolComparison = LiveBenchmarkQuality.CompareLanguageTool(report) };
         var plannedMeasurements = runnableCells.Length * corpus.Count * configuration.Repetitions
                                   + configuration.ColdStartCount;
-        if (configuration.CompareLanguageTool)
-        {
-            plannedMeasurements += 2 * configuration.WarmLanguageToolCases
-                * Math.Min(configuration.WarmLanguageToolRounds, configuration.LanguageToolRepetitions);
-        }
         report = report with
         {
             TargetLiveDurationMinutes = configuration.TargetLiveDurationMinutes,
@@ -1357,11 +1255,6 @@ internal static class LiveBenchmarkRunner
                 Warmup = false,
                 ContentlessSchemaWarmup = false,
                 ColdStartCount = 0,
-                CompareLanguageTool = definition.Stage == 4 && configuration.CompareLanguageTool,
-                WarmLanguageToolRounds = 1,
-                WarmLanguageToolCases = LiveBenchmarkStagePlan.LanguageToolCaseIds.Count,
-                LanguageToolRepetitions = 1,
-                LanguageToolCaseIds = LiveBenchmarkStagePlan.LanguageToolCaseIds.ToHashSet(StringComparer.Ordinal),
                 SelectedCells = selectedCells,
                 Protocols = definition.Stage <= 2
                     ? [LiveBenchmarkProtocols.Full]
@@ -1401,8 +1294,7 @@ internal static class LiveBenchmarkRunner
                 stageConfiguration,
                 selectedCorpus,
                 runtime,
-                cancellationToken,
-                corpus).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             previous = stageRun.Report;
             stageReports.Add(new LiveBenchmarkStageSummary(
                 definition.Stage,
@@ -1437,7 +1329,6 @@ internal static class LiveBenchmarkRunner
         {
             Stages = stageReports,
             QualityGates = LiveBenchmarkQuality.BuildGates(stageReports),
-            LanguageToolComparison = LiveBenchmarkQuality.CompareLanguageTool(previous),
             PlannedMeasurements = stageReports.Sum(item => item.PlannedMeasurements),
             ExecutedMeasurements = stageReports.Sum(item => item.ExecutedMeasurements),
             CompleteStageCoverage = stageReports.Count == LiveBenchmarkStagePlan.Definitions.Count
@@ -1683,112 +1574,7 @@ internal static class LiveBenchmarkRunner
         }
     }
 
-    private static async Task RunLanguageToolComparisonAsync(
-        IReadOnlyList<CorpusCase> corpus,
-        LiveBenchmarkConfiguration configuration,
-        CodexAppServerClient lunaClient,
-        AppLocalizer localizer,
-        LiveBenchmarkCell lunaCell,
-        ConcurrentBag<LiveBenchmarkObservation> observations,
-        SemaphoreSlim inFlight,
-        CancellationToken cancellationToken)
-    {
-        var selected = configuration.LanguageToolCaseIds is { Count: > 0 } ids
-            ? corpus.Where(item => ids.Contains(item.Id)).OrderBy(item => item.Id, StringComparer.Ordinal).ToArray()
-            : SelectRepresentativeProviderCases(corpus, configuration.WarmLanguageToolCases, configuration.Seed);
-        if (configuration.LanguageToolCaseIds is { Count: > 0 } requested && selected.Length != requested.Count)
-        {
-            var missing = requested.Except(selected.Select(item => item.Id), StringComparer.Ordinal);
-            throw new InvalidOperationException($"Unbekannte LanguageTool-Benchmark-IDs: {string.Join(", ", missing)}");
-        }
-
-        if (selected.Length > 20)
-        {
-            throw new InvalidOperationException("Der opt-in LanguageTool-Vergleich darf wegen des öffentlichen Limits höchstens 20 Fälle enthalten.");
-        }
-
-        using var client = new LanguageToolClient();
-        var provider = new LanguageToolCorrectionProvider(client, new CorrectionEngine());
-        var nextAllowedStart = DateTimeOffset.UtcNow;
-        var spacing = TimeSpan.FromSeconds(
-            60d / Math.Min(configuration.LanguageToolMaxStartsPerMinute, 20));
-        var rounds = Math.Min(configuration.WarmLanguageToolRounds, configuration.LanguageToolRepetitions);
-        for (var repetition = 1; repetition <= rounds; repetition++)
-        {
-            foreach (var caseItem in LiveBenchmarkScheduler.Mix(selected, configuration.Seed + 7_919 + repetition * 101))
-            {
-                var delay = nextAllowedStart - DateTimeOffset.UtcNow;
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                }
-
-                nextAllowedStart = DateTimeOffset.UtcNow + spacing;
-                var lunaTask = RunLunaRequestAsync(
-                    lunaClient,
-                    localizer,
-                    lunaCell,
-                    repetition,
-                    caseItem,
-                    configuration,
-                    inFlight,
-                    cancellationToken);
-                var stopwatch = Stopwatch.StartNew();
-                try
-                {
-                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(TimeSpan.FromSeconds(configuration.TimeoutSeconds));
-                    try
-                    {
-                        var result = await provider.CorrectAsync(caseItem.Input, timeout.Token).ConfigureAwait(false);
-                        stopwatch.Stop();
-                        var evaluation = CorpusQualityEvaluator.Evaluate(caseItem, result.CorrectedText);
-                        var languageToolObservation = new LiveBenchmarkObservation(
-                            "language-tool",
-                            "language-tool",
-                            null,
-                            repetition,
-                            caseItem.Id,
-                            caseItem.Language,
-                            caseItem.Category,
-                            caseItem.IsControl,
-                            true,
-                            evaluation.HardGatePassed,
-                            stopwatch.Elapsed.TotalMilliseconds,
-                            result.Elapsed.TotalMilliseconds,
-                            null)
-                        {
-                            Weight = caseItem.Weight,
-                            TruePositive = evaluation.IsTruePositive,
-                            FalsePositive = evaluation.IsFalsePositive,
-                            FalseNegative = evaluation.IsFalseNegative,
-                            SafetyCritical = IsSafetyCritical(caseItem),
-                            Protocol = LiveBenchmarkProtocols.Full,
-                            OutputCharacters = result.CorrectedText.Length
-                        };
-                        observations.Add(languageToolObservation);
-                    }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        stopwatch.Stop();
-                        observations.Add(FailedLanguageTool(caseItem, repetition, stopwatch.Elapsed.TotalMilliseconds, "Timeout"));
-                    }
-                    catch (Exception exception)
-                    {
-                        stopwatch.Stop();
-                        observations.Add(FailedLanguageTool(caseItem, repetition, stopwatch.Elapsed.TotalMilliseconds, exception.GetType().Name));
-                    }
-                }
-                finally
-                {
-                    var lunaObservation = await lunaTask.ConfigureAwait(false);
-                    observations.Add(lunaObservation with { Provider = "luna-comparison" });
-                }
-            }
-        }
-    }
-
-    internal static CorpusCase[] SelectRepresentativeProviderCases(
+    internal static CorpusCase[] SelectRepresentativeCases(
         IReadOnlyList<CorpusCase> corpus,
         int maximum,
         int seed)
@@ -1836,27 +1622,6 @@ internal static class LiveBenchmarkRunner
         return selected.ToArray();
     }
 
-    private static LiveBenchmarkObservation FailedLanguageTool(CorpusCase caseItem, int repetition, double durationMs, string errorType) =>
-        new(
-            "language-tool",
-            "language-tool",
-            null,
-            repetition,
-            caseItem.Id,
-            caseItem.Language,
-            caseItem.Category,
-            caseItem.IsControl,
-            false,
-            false,
-            durationMs,
-            null,
-            errorType)
-        {
-            Weight = caseItem.Weight,
-            FalseNegative = !caseItem.IsControl,
-            SafetyCritical = IsSafetyCritical(caseItem)
-        };
-
     private static bool IsSafetyCritical(CorpusCase caseItem) =>
         caseItem.IsControl
         || caseItem.MustPreserve.Count > 0
@@ -1888,7 +1653,7 @@ internal static class LiveBenchmarkRunner
                     group.Key.Provider,
                     group.Key.Variant,
                     group.Key.Effort,
-                    group.Key.Provider == "language-tool" ? configuration.LanguageToolRepetitions : configuration.Repetitions,
+                    configuration.Repetitions,
                     items.Length,
                     items.Count(item => item.Succeeded),
                     items.Count(item => !item.Succeeded),
@@ -2341,92 +2106,6 @@ internal static class LiveBenchmarkQuality
             .ToArray();
     }
 
-    public static LiveBenchmarkProviderComparison? CompareLanguageTool(LiveBenchmarkReport report)
-    {
-        var comparisonProvider = report.Observations.Any(item => item.Provider == "luna-comparison")
-            ? "luna-comparison"
-            : "luna";
-        var lunaCells = report.Cells
-            .Where(cell => cell.Provider == comparisonProvider)
-            .OrderByDescending(cell => cell.F05)
-            .ThenBy(cell => cell.P95DurationMs)
-            .ToArray();
-        if (lunaCells.Length == 0)
-        {
-            return null;
-        }
-
-        var bestLuna = lunaCells[0];
-        var lunaObservations = report.Observations
-            .Where(item => item.Provider == comparisonProvider
-                           && item.Variant == bestLuna.Variant
-                           && item.Effort == bestLuna.Effort
-                           && item.Protocol == bestLuna.Protocol)
-            .ToArray();
-        var languageToolObservations = report.Observations
-            .Where(item => item.Provider == "language-tool")
-            .ToArray();
-        var pairedKeys = lunaObservations
-            .Select(item => (item.CaseId, item.Repetition))
-            .Intersect(languageToolObservations.Select(item => (item.CaseId, item.Repetition)))
-            .ToHashSet();
-        if (pairedKeys.Count == 0)
-        {
-            return null;
-        }
-
-        var lunaPaired = lunaObservations
-            .Where(item => pairedKeys.Contains((item.CaseId, item.Repetition)))
-            .ToArray();
-        var languageToolPaired = languageToolObservations
-            .Where(item => pairedKeys.Contains((item.CaseId, item.Repetition)))
-            .ToArray();
-        var pairs = Pair(lunaPaired, languageToolPaired);
-        if (pairs.Count == 0)
-        {
-            return null;
-        }
-
-        var lunaF05 = F05(pairs.Select(item => item.Candidate));
-        var languageToolF05 = F05(pairs.Select(item => item.Baseline));
-        var lunaP50 = QualityStatistics.Percentile(lunaPaired.Select(item => item.DurationMs), 0.50);
-        var languageToolP50 = QualityStatistics.Percentile(languageToolPaired.Select(item => item.DurationMs), 0.50);
-        var lunaP95 = QualityStatistics.Percentile(lunaPaired.Select(item => item.DurationMs), 0.95);
-        var languageToolP95 = QualityStatistics.Percentile(languageToolPaired.Select(item => item.DurationMs), 0.95);
-        double? p50Ratio = languageToolP50 <= 0 ? null : lunaP50 / languageToolP50;
-        double? p95Ratio = languageToolP95 <= 0 ? null : lunaP95 / languageToolP95;
-        var qualityInterval = BootstrapQualityDifference(pairs, 5_000, 101);
-        var p50Interval = BootstrapLatencyRatio(pairs, 0.50, 5_000, 103);
-        var p95Interval = BootstrapLatencyRatio(pairs, 0.95, 5_000, 107);
-        var qualityNonInferior = qualityInterval.Lower >= -NonInferiorityMargin;
-        var faster = p50Ratio <= RequiredLatencyRatio
-                     && p95Ratio <= RequiredLatencyRatio
-                     && p50Interval.Upper < 1
-                     && p95Interval.Upper < 1;
-        var ciWidth = ConfidenceIntervalWidth(
-            lunaPaired.Count(item => item.Exact),
-            lunaPaired.Length);
-        return new LiveBenchmarkProviderComparison(
-            comparisonProvider,
-            "language-tool",
-            pairedKeys.Select(key => key.CaseId).Distinct(StringComparer.Ordinal).Count(),
-            pairedKeys.Select(key => key.Repetition).Distinct().Count(),
-            lunaF05,
-            languageToolF05,
-            p50Ratio,
-            p95Ratio,
-            qualityNonInferior,
-            faster,
-            ciWidth,
-            qualityNonInferior && faster && ciWidth < 1)
-        {
-            Protocol = bestLuna.Protocol,
-            QualityDifferenceLower95 = qualityInterval.Lower,
-            P50RatioUpper95 = p50Interval.Upper,
-            P95RatioUpper95 = p95Interval.Upper
-        };
-    }
-
     private static double F05(IEnumerable<LiveBenchmarkObservation> observations)
     {
         var values = observations.ToArray();
@@ -2584,30 +2263,12 @@ internal static class LiveBenchmarkHardAssertions
             throw new InvalidOperationException($"Mindestens eine Luna-Zelle unterschreitet die Mindestzahl exakter Korrekturen ({configuration.MinimumCorrectedExact}).");
         }
 
-        if (configuration.CompareLanguageTool && report.LanguageToolComparison is null)
-        {
-            throw new InvalidOperationException(
-                "Der angeforderte gepaarte LanguageTool-Vergleich fehlt im Benchmark-Bericht.");
-        }
-
         if (configuration.RequirePerformanceGate)
         {
             if (report.QualityGates.Count == 0 || !report.QualityGates.Any(gate => gate.Passed))
             {
                 throw new InvalidOperationException(
                     "Keine finale Luna-Zelle besteht die gepaarte Qualitäts-Nichtunterlegenheit.");
-            }
-
-            if (!configuration.CompareLanguageTool)
-            {
-                throw new InvalidOperationException(
-                    "Das vollständige Performancegatter benötigt den gepaarten LanguageTool-Vergleich.");
-            }
-
-            if (report.LanguageToolComparison is not { Passed: true })
-            {
-                throw new InvalidOperationException(
-                    "Der gepaarte LanguageTool-Vergleich fehlt oder Luna erfüllt nicht gleichzeitig Qualitäts- und Latenzgatter.");
             }
         }
     }

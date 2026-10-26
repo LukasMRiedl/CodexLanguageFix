@@ -20,7 +20,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             scenario.Composer.Current = Snapshot("Das ist ein fehler.");
             typeof(CorrectionCoordinator).GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .SetValue(scenario.Coordinator, true);
@@ -36,7 +36,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             var snapshot = Snapshot("text mit fehler");
             scenario.Composer.Current = snapshot;
             Exception? dialogFailure = null;
@@ -101,7 +101,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             var snapshot = Snapshot("text mit fehler");
             scenario.Composer.Current = snapshot;
 
@@ -136,7 +136,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             var snapshot = Snapshot("ohne klick");
             scenario.Composer.Current = snapshot;
 
@@ -156,7 +156,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             var original = Snapshot("alter text");
             scenario.Composer.Current = original;
 
@@ -181,7 +181,7 @@ public sealed class CoordinatorPreparationTests
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.Luna);
+            using var scenario = new Scenario();
             var original = Snapshot("alter text");
             scenario.Composer.Current = original;
             var preparationTask = StartPreparation(scenario.Coordinator, original);
@@ -216,12 +216,12 @@ public sealed class CoordinatorPreparationTests
     }
 
     [Fact]
-    public void LanguageToolSelectionDoesNotStartBackgroundProviderRequests()
+    public void UnfocusedComposerDoesNotStartBackgroundProviderRequests()
     {
         RunOnSta(dispatcher =>
         {
-            using var scenario = new Scenario(CorrectionProviderKind.LanguageTool);
-            var snapshot = Snapshot("keine automatische languagetool Anfrage");
+            using var scenario = new Scenario();
+            var snapshot = Snapshot("keine automatische Anfrage");
             snapshot = snapshot with { Bounds = Rect.Empty };
             scenario.Composer.Current = snapshot;
 
@@ -229,10 +229,71 @@ public sealed class CoordinatorPreparationTests
             PumpFor(dispatcher, CorrectionPreparation.QuietPeriod + TimeSpan.FromMilliseconds(100));
 
             Assert.False(scenario.Preparation.IsReady(snapshot));
-            Assert.Equal(0, scenario.LanguageTool.RequestCount);
             Assert.Equal(0, scenario.Luna.RequestCount);
             Assert.Empty(scenario.Composer.Writes);
         });
+    }
+
+    [Fact]
+    public void ProviderFailureDoesNotWriteAndReportsUnavailableStatus()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            var snapshot = Snapshot("Text mit Fehler");
+            scenario.Composer.Current = snapshot;
+            scenario.Luna.FailImmediately(snapshot.Text);
+
+            InvokeManualCorrection(scenario.Coordinator).GetAwaiter().GetResult();
+
+            Assert.Equal(snapshot.Text, scenario.Composer.Current!.Text);
+            Assert.Empty(scenario.Composer.Writes);
+            Assert.Contains("Correction unavailable", scenario.LastStatus);
+        });
+    }
+
+    [Fact]
+    public async Task CodexOnlyLiveCorrectionAndUndoUseSyntheticComposer()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_CODEX_ONLY_SMOKE") != "1")
+            return;
+
+        var localizer = new AppLocalizer("de");
+        using var client = new CodexAppServerClient(LunaLiveRuntime.CreateDirectory(), localizer);
+        var account = await client.GetAccountAsync(CancellationToken.None);
+        Assert.True(account.IsChatGpt);
+        var profile = await client.ResolveLunaProfileAsync(CancellationToken.None);
+        Assert.Equal("low", profile.Effort);
+        Assert.Equal("priority", profile.ServiceTier);
+
+        var provider = new LunaCorrectionProvider(client, localizer);
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario(provider, provider);
+            const string original = "Das ist ein test.";
+            scenario.Composer.Current = Snapshot(original);
+
+            var click = InvokeManualCorrection(scenario.Coordinator);
+            Assert.True(PumpUntil(dispatcher, () => click.IsCompleted, TimeSpan.FromSeconds(90)));
+            click.GetAwaiter().GetResult();
+            Assert.Single(scenario.Composer.Writes);
+            Assert.Contains("Test", scenario.Composer.Current!.Text, StringComparison.Ordinal);
+            Assert.NotEqual(original, scenario.Composer.Current.Text);
+            InvokeCoordinatorMethod(scenario.Coordinator, "Undo");
+            Assert.Equal(original, scenario.Composer.Current.Text);
+            Assert.Equal(2, scenario.Composer.Writes.Count);
+
+            var shortcut = (Task)typeof(CorrectionCoordinator)
+                .GetMethod("CorrectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(scenario.Coordinator, [true])!;
+            Assert.True(PumpUntil(dispatcher, () => shortcut.IsCompleted, TimeSpan.FromSeconds(90)));
+            shortcut.GetAwaiter().GetResult();
+            Assert.Equal(3, scenario.Composer.Writes.Count);
+            Assert.Contains("Test", scenario.Composer.Current!.Text, StringComparison.Ordinal);
+            InvokeCoordinatorMethod(scenario.Coordinator, "Undo");
+            Assert.Equal(original, scenario.Composer.Current.Text);
+            Assert.Equal(4, scenario.Composer.Writes.Count);
+        }, TimeSpan.FromSeconds(210));
     }
 
     private static ComposerSnapshot Snapshot(string text) => new(
@@ -307,7 +368,7 @@ public sealed class CoordinatorPreparationTests
         timer.Stop();
     }
 
-    private static void RunOnSta(Action<Dispatcher> action)
+    private static void RunOnSta(Action<Dispatcher> action, TimeSpan? timeout = null)
     {
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -331,7 +392,7 @@ public sealed class CoordinatorPreparationTests
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "Der Coordinator-Vorbereitungstest hat das Zeitlimit überschritten.");
+        Assert.True(thread.Join(timeout ?? TimeSpan.FromSeconds(20)), "Der Coordinator-Vorbereitungstest hat das Zeitlimit überschritten.");
         if (failure is not null)
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
@@ -344,15 +405,14 @@ public sealed class CoordinatorPreparationTests
         private readonly TrayController _tray;
         private readonly OverlayWindow _overlay;
 
-        public Scenario(CorrectionProviderKind selectedProvider)
+        public Scenario(ICorrectionProvider? provider = null, IOpenAiConnection? connection = null)
         {
             Directory.CreateDirectory(_directory);
             var localizer = new AppLocalizer("en");
             var settings = new AppSettings
             {
                 Enabled = true,
-                PrepareLunaCorrections = true,
-                CorrectionProvider = selectedProvider
+                PrepareLunaCorrections = true
             };
             var settingsService = new SettingsService(_directory);
             _tray = new TrayController(settings, settingsService, new AutostartService(localizer), localizer);
@@ -364,11 +424,10 @@ public sealed class CoordinatorPreparationTests
             _overlay = new OverlayWindow(localizer);
             Composer = new ComposerAccessor();
             Luna = new CachingProvider(CorrectionProviderKind.Luna);
-            LanguageTool = new CachingProvider(CorrectionProviderKind.LanguageTool);
             Coordinator = new CorrectionCoordinator(
                 Composer,
-                [LanguageTool, Luna],
-                new OpenAiConnection(),
+                provider ?? Luna,
+                connection ?? new OpenAiConnection(),
                 _overlay,
                 _tray,
                 new DiagnosticLogger(_directory),
@@ -380,7 +439,6 @@ public sealed class CoordinatorPreparationTests
         public string LastStatus => _tray.LastStatus;
         public ComposerAccessor Composer { get; }
         public CachingProvider Luna { get; }
-        public CachingProvider LanguageTool { get; }
         public CorrectionCoordinator Coordinator { get; }
         public CorrectionPreparation Preparation => GetPreparation(Coordinator);
 
@@ -424,6 +482,7 @@ public sealed class CoordinatorPreparationTests
         private readonly Dictionary<string, CorrectionProviderResult> _cache = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Pending> _pending = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _immediate = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _fail = new(StringComparer.Ordinal);
 
         public CorrectionProviderKind Kind => kind;
         public int RequestCount { get; private set; }
@@ -434,6 +493,8 @@ public sealed class CoordinatorPreparationTests
             lock (_gate)
             {
                 RequestCount++;
+                if (_fail.Remove(text))
+                    return Task.FromException<CorrectionProviderResult>(new LanguageFixException("Provider failure"));
                 if (_cache.TryGetValue(text, out var cached))
                     return Task.FromResult(cached with { CacheHit = true });
                 if (_pending.TryGetValue(text, out var inFlight))
@@ -477,6 +538,11 @@ public sealed class CoordinatorPreparationTests
         public void CompleteImmediately(string text)
         {
             lock (_gate) _immediate[text] = Corrected(text);
+        }
+
+        public void FailImmediately(string text)
+        {
+            lock (_gate) _fail.Add(text);
         }
 
         private CorrectionProviderResult CreateResult(string correctedText) =>

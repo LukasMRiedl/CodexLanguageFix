@@ -182,8 +182,8 @@ public sealed class CorrectionPreparationTests
     }
 
     [Fact]
-    public void LanguageToolCannotBeUsedForAutomaticPreparation() =>
-        Assert.Throws<ArgumentException>(() => new CorrectionPreparation(new Provider(CorrectionProviderKind.LanguageTool)));
+    public void UnsupportedProviderCannotBeUsedForAutomaticPreparation() =>
+        Assert.Throws<ArgumentException>(() => new CorrectionPreparation(new Provider((CorrectionProviderKind)0)));
 
     [Fact]
     public void DisposeCancelsRunningOperationAndPreventsNewRequests()

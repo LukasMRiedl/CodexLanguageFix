@@ -12,9 +12,6 @@ public sealed class TrayController : IDisposable
     private readonly ToolStripMenuItem _autostartItem;
     private readonly ToolStripMenuItem _prepareLunaCorrectionsItem;
     private readonly ToolStripMenuItem _connectionItem;
-    private readonly ToolStripMenuItem _providerItem;
-    private readonly ToolStripMenuItem _languageToolProviderItem;
-    private readonly ToolStripMenuItem _lunaProviderItem;
     private readonly ToolStripMenuItem _connectOpenAiItem;
     private readonly ToolStripMenuItem _languageItem;
     private readonly ToolStripMenuItem _automaticLanguageItem;
@@ -93,17 +90,8 @@ public sealed class TrayController : IDisposable
 
         _connectionItem = new ToolStripMenuItem();
         _connectionItem.Click += (_, _) => ConnectionTestRequested?.Invoke(this, EventArgs.Empty);
-        _providerItem = new ToolStripMenuItem();
-        _languageToolProviderItem = CreateProviderItem(CorrectionProviderKind.LanguageTool);
-        _lunaProviderItem = CreateProviderItem(CorrectionProviderKind.Luna);
         _connectOpenAiItem = new ToolStripMenuItem();
         _connectOpenAiItem.Click += (_, _) => ConnectOpenAiRequested?.Invoke(this, EventArgs.Empty);
-        _providerItem.DropDownItems.AddRange([
-            _languageToolProviderItem,
-            _lunaProviderItem,
-            new ToolStripSeparator(),
-            _connectOpenAiItem
-        ]);
         _languageItem = new ToolStripMenuItem();
         _automaticLanguageItem = CreateLanguageItem(AppLocalizer.Automatic);
         _germanLanguageItem = CreateLanguageItem(AppLocalizer.German);
@@ -119,7 +107,7 @@ public sealed class TrayController : IDisposable
             _enabledItem,
             _autostartItem,
             new ToolStripSeparator(),
-            _providerItem,
+            _connectOpenAiItem,
             _prepareLunaCorrectionsItem,
             _connectionItem,
             _languageItem,
@@ -143,7 +131,6 @@ public sealed class TrayController : IDisposable
     public event EventHandler? EnabledChanged;
     public event EventHandler? PreparationChanged;
     public event EventHandler? ConnectionTestRequested;
-    public event EventHandler? ProviderChanged;
     public event EventHandler? ConnectOpenAiRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? SettingsRequested;
@@ -173,26 +160,6 @@ public sealed class TrayController : IDisposable
 
     public bool PrepareLunaCorrections => _settings.PrepareLunaCorrections;
 
-    public CorrectionProviderKind CurrentProvider => _settings.CorrectionProvider;
-
-    private ToolStripMenuItem CreateProviderItem(CorrectionProviderKind provider)
-    {
-        var item = new ToolStripMenuItem { Tag = provider };
-        item.Click += (_, _) =>
-        {
-            if (_settings.CorrectionProvider == provider)
-            {
-                return;
-            }
-
-            _settings.CorrectionProvider = provider;
-            Save();
-            UpdateProviderChecks();
-            ProviderChanged?.Invoke(this, EventArgs.Empty);
-        };
-        return item;
-    }
-
     private ToolStripMenuItem CreateLanguageItem(string language)
     {
         var item = new ToolStripMenuItem { Tag = language };
@@ -214,9 +181,6 @@ public sealed class TrayController : IDisposable
         _autostartItem.Text = _localizer.Get(AppText.StartWithWindows);
         _prepareLunaCorrectionsItem.Text = _localizer.Get(AppText.PrepareLunaCorrections);
         _connectionItem.Text = _localizer.Get(AppText.TestConnection);
-        _providerItem.Text = _localizer.Get(AppText.CorrectionProvider);
-        _languageToolProviderItem.Text = _localizer.Get(AppText.ProviderLanguageTool);
-        _lunaProviderItem.Text = _localizer.Get(AppText.ProviderLuna);
         _connectOpenAiItem.Text = _localizer.Get(AppText.ConnectOpenAi);
         _languageItem.Text = _localizer.Get(AppText.Language);
         _automaticLanguageItem.Text = _localizer.Get(AppText.LanguageAutomatic);
@@ -225,13 +189,6 @@ public sealed class TrayController : IDisposable
         _settingsItem.Text = _localizer.Get(AppText.Settings);
         _exitItem.Text = _localizer.Get(AppText.Exit);
         UpdateLanguageChecks();
-        UpdateProviderChecks();
-    }
-
-    private void UpdateProviderChecks()
-    {
-        _languageToolProviderItem.Checked = _settings.CorrectionProvider == CorrectionProviderKind.LanguageTool;
-        _lunaProviderItem.Checked = _settings.CorrectionProvider == CorrectionProviderKind.Luna;
     }
 
     private void UpdateLanguageChecks()
