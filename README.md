@@ -2,6 +2,8 @@
 
 **English** · [Deutsch](README.de.md)
 
+Development toward 1.6.0 adds general Windows text controls and an optional [Chrome extension](browser-extension/README.md). The [November 6 verification report](docs/windows-coverage-2026-11-06.md) documents the Codex selection fix, native Windows process isolation, and actual live checks. Coverage across all applications remains partial; the user cancelled the RAM comparison. The [earlier acceptance report](docs/windows-chrome-1.6.0.md) preserves the development history.
+
 A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop, Antigravity, and Hermes. Corrections use only Codex through its official ChatGPT OAuth session and the existing Luna model profile. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
 
 > This is an independent project and is not affiliated with OpenAI or Google.

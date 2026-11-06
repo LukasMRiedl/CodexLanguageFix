@@ -23,8 +23,10 @@ public sealed class LiveFieldCoverageTests(ITestOutputHelper output)
         Assert.NotNull(snapshot);
         Assert.Equal(ComposerHost.Codex, snapshot.Host);
         Assert.NotEmpty(snapshot.EditorTextBounds!);
-        using var app = Assert.Single(Process.GetProcessesByName("CodexLanguageFix"));
         var name = new AppLocalizer(new SettingsService().Load().Language).Get(AppText.CorrectAutomationName);
+        var processes = Process.GetProcessesByName("CodexLanguageFix");
+        using var app = LiveDesktopAppProcess.FindOverlayOwner(processes, name);
+        foreach (var process in processes.Where(process => process != app)) process.Dispose();
         var button = Assert.Single(AutomationElement.RootElement.FindAll(TreeScope.Descendants,
             new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, app.Id),
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),

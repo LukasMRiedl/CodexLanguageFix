@@ -11,13 +11,19 @@ public interface IComposerAccessor
     ComposerSnapshot? TryRefresh(ComposerSnapshot snapshot);
     bool TryReplace(ComposerSnapshot snapshot, string expectedText, string replacement);
     ComposerWriteResult? LastWriteResult => null;
+    bool LastCaptureWasKeyboardFocused => false;
+    string LastCaptureStatus => "unknown";
+    string LastWriteStatus => "unknown";
+    ComposerHost? LastCaptureHost => null;
+    string? LastFieldCategory => null;
 }
 
 public enum ComposerHost
 {
     Codex,
     Antigravity,
-    Hermes
+    Hermes,
+    Windows
 }
 
 public sealed record ComposerSnapshot(

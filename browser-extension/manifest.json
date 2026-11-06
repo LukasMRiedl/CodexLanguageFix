@@ -1,0 +1,29 @@
+{
+  "name": "Codex Textkorrektur",
+  "version": "1.6.0",
+  "manifest_version": 3,
+  "description": "Textkorrektur mit der lokal verbundenen Codex-App.",
+  "permissions": [
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "js": [
+        "core.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "incognito": "not_allowed",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlqcvuZLm2pBzHA7IxUyPefff5nUQTsZ+UyjpsNQ04bBSPA4vwSE5P6bL5HGyOGZ6Z4peb1cHo+3YcNlowMSX48BvYum3wDqCmTeltcybiOmtSTzk5mU22TV6OWib+2w8kqhpZuclYbSLTtOje33a3iLUMbf1XMerw4XnYsJVwWCDdaGDJgiT7PcWMdy5Xdt5dfPTbmrcDj1nbjoYEpGAKe4IHSAcr4yLI+zWOVYBLhv3fJKpOM0Y9WGaaDi29oauPgQX5msRZFwnI4uocbXZ9WKmmT8FDqCi8go0rg4tAQLTxZ9A9z400bo4P9JLXdI9IK/16vgW/rdofeRR8TUg6wIDAQAB"
+}

@@ -105,6 +105,59 @@ public sealed class CodexFocusWatcherTests
         });
     }
 
+    [Theory]
+    [InlineData(-8)]
+    [InlineData(-9)]
+    public void CaretAndCursorEventsDoNotTriggerLayoutWork(int objectId)
+    {
+        RunSta(dispatcher =>
+        {
+            using var watcher = CreateIsolatedWatcher(dispatcher);
+            var count = 0;
+            watcher.Changed += (_, _) => count++;
+            foreach (var type in new uint[] { 0x8001, 0x8002, 0x8003, 0x800B })
+                RaiseEvent(watcher, type, objectId);
+            Pump(dispatcher, TimeSpan.FromMilliseconds(150));
+            Assert.Equal(0, count);
+            Assert.False(GetTimer(watcher).IsEnabled);
+        });
+    }
+
+    [Theory]
+    [InlineData(0x800Bu)]
+    [InlineData(0x8015u)]
+    public void GeometryAndScrollEventsDoNotInvalidateKeyboardFocus(uint type)
+    {
+        RunSta(dispatcher =>
+        {
+            using var watcher = CreateIsolatedWatcher(dispatcher);
+            var changes = new List<bool>();
+            watcher.Changed += (_, e) => changes.Add(Assert.IsType<ComposerChangeEventArgs>(e).FocusChanged);
+            RaiseEvent(watcher, type, -4);
+            Pump(dispatcher, TimeSpan.FromMilliseconds(200));
+            Assert.Equal(new[] { false }, changes);
+        });
+    }
+
+    [Fact]
+    public void FocusEventIsNotLostWhenGeometryWasAlreadyQueued()
+    {
+        RunSta(dispatcher =>
+        {
+            using var watcher = CreateIsolatedWatcher(dispatcher);
+            var changes = new List<bool>();
+            watcher.Changed += (_, e) => changes.Add(Assert.IsType<ComposerChangeEventArgs>(e).FocusChanged);
+            RaiseEvent(watcher, 0x800B, -4);
+            RaiseEvent(watcher, 0x8005, -4);
+            Pump(dispatcher, TimeSpan.FromMilliseconds(200));
+            Assert.Equal(new[] { true }, changes);
+        });
+    }
+
+    private static void RaiseEvent(CodexFocusWatcher watcher, uint type, int objectId) =>
+        typeof(CodexFocusWatcher).GetMethod("OnWinEvent", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(watcher, [nint.Zero, type, nint.Zero, objectId, 0, 0u, 0u]);
+
     private static CodexFocusWatcher CreateIsolatedWatcher(Dispatcher dispatcher)
     {
         var watcher = new CodexFocusWatcher(dispatcher);

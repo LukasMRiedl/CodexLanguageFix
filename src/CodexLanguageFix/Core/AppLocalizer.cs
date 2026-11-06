@@ -4,6 +4,9 @@ namespace CodexLanguageFix.Core;
 
 public enum AppText
 {
+    BrowserCorrectionReady,
+    BrowserCorrectionFailed,
+    BrowserCorrectionDisabled,
     FirstRunHeading,
     FirstRunExplanation,
     FirstRunPrivacy,
@@ -186,6 +189,9 @@ public sealed class AppLocalizer
         [AppText.ComposerUnavailable] = "The prompt field is no longer available. Nothing was overwritten.",
         [AppText.PromptChanged] = "The prompt changed during the check. Nothing was overwritten.",
         [AppText.WriteRejected] = "The correction could not be inserted safely. Please check the input field.",
+        [AppText.BrowserCorrectionReady] = "Chrome correction ready.",
+        [AppText.BrowserCorrectionFailed] = "Codex correction failed. Your text was not changed.",
+        [AppText.BrowserCorrectionDisabled] = "Correction is paused or automatic preparation is disabled.",
         [AppText.PromptCorrected] = "Prompt corrected",
         [AppText.CorrectionAppliedOne] = "1 correction was applied with {0}.",
         [AppText.CorrectionsAppliedMany] = "{0:N0} corrections were applied with {1}.",
@@ -261,6 +267,9 @@ public sealed class AppLocalizer
         [AppText.ComposerUnavailable] = "Das Eingabefeld ist nicht mehr verfügbar. Es wurde nichts überschrieben.",
         [AppText.PromptChanged] = "Der Prompt wurde während der Prüfung verändert. Es wurde nichts überschrieben.",
         [AppText.WriteRejected] = "Die Korrektur konnte nicht sicher eingesetzt werden. Bitte prüfe das Eingabefeld.",
+        [AppText.BrowserCorrectionReady] = "Chrome-Korrektur bereit.",
+        [AppText.BrowserCorrectionFailed] = "Die Codex-Korrektur ist fehlgeschlagen. Dein Text wurde nicht geändert.",
+        [AppText.BrowserCorrectionDisabled] = "Die Korrektur ist pausiert oder die automatische Vorbereitung deaktiviert.",
         [AppText.PromptCorrected] = "Prompt korrigiert",
         [AppText.CorrectionAppliedOne] = "1 Korrektur wurde mit {0} übernommen.",
         [AppText.CorrectionsAppliedMany] = "{0:N0} Korrekturen wurden mit {1} übernommen.",

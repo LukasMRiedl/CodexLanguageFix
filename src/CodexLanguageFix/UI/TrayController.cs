@@ -135,6 +135,7 @@ public sealed class TrayController : IDisposable
     public event EventHandler? ExitRequested;
     public event EventHandler? SettingsRequested;
     public event EventHandler? LastStatusChanged;
+    public event EventHandler? ShortcutChanged;
     public CorrectionShortcut Shortcut => new(_settings.ShortcutModifiers, _settings.ShortcutVirtualKey);
     public string LastStatus => _lastStatus ?? _localizer.Get(AppText.NoStatus);
 
@@ -147,6 +148,7 @@ public sealed class TrayController : IDisposable
             _settings.ShortcutModifiers = shortcut.Modifiers;
             _settings.ShortcutVirtualKey = shortcut.VirtualKey;
             Save();
+            ShortcutChanged?.Invoke(this, EventArgs.Empty);
         }
         catch
         {

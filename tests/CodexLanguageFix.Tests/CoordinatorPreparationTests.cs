@@ -16,6 +16,55 @@ public sealed class CoordinatorPreparationTests
     private static readonly TimeSpan DispatcherTimeout = TimeSpan.FromSeconds(4);
 
     [Fact]
+    public void MissingEditorRecoversThroughPollingAndSettingsPauseStopsRecovery()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            var timer = (DispatcherTimer)typeof(CorrectionCoordinator)
+                .GetField("_fallbackTimer", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(scenario.Coordinator)!;
+            var visible = typeof(CorrectionCoordinator)
+                .GetField("_visibleSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var overlay = (OverlayWindow)typeof(CorrectionCoordinator)
+                .GetField("_overlay", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(scenario.Coordinator)!;
+            var refreshing = typeof(CorrectionCoordinator)
+                .GetField("_refreshing", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var hotkey = (CodexLanguageFix.Windows.CorrectionHotkey)typeof(CorrectionCoordinator)
+                .GetField("_hotkey", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(scenario.Coordinator)!;
+            var registered = typeof(CodexLanguageFix.Windows.CorrectionHotkey)
+                .GetField("_registered", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Assert.True(hotkey.SetShortcut(new CorrectionShortcut(0, 0x85)));
+            Assert.True(hotkey.SetEnabled(true));
+
+            scenario.Coordinator.Start();
+            Assert.True(PumpUntil(dispatcher, () => !(bool)refreshing.GetValue(scenario.Coordinator)!, DispatcherTimeout));
+            Assert.True(timer.IsEnabled);
+            Assert.Null(visible.GetValue(scenario.Coordinator));
+            Assert.False((bool)registered.GetValue(hotkey)!);
+            Assert.False(overlay.IsVisible);
+
+            var recovered = Snapshot("Wieder verfügbares Feld");
+            scenario.Composer.Current = recovered;
+            Assert.True(PumpUntil(dispatcher, () => ReferenceEquals(recovered, visible.GetValue(scenario.Coordinator)), DispatcherTimeout),
+                "Ein wieder verfügbares Feld muss ohne neues WinEvent durch den Timer erkannt werden.");
+            Assert.Empty(scenario.Composer.Writes);
+
+            typeof(CorrectionCoordinator).GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(scenario.Coordinator, true);
+            InvokeCoordinatorMethod(scenario.Coordinator, "RefreshOverlay");
+            Assert.True(PumpUntil(dispatcher, () => !(bool)refreshing.GetValue(scenario.Coordinator)!, DispatcherTimeout));
+            Assert.False(timer.IsEnabled);
+            Assert.Null(visible.GetValue(scenario.Coordinator));
+            Assert.False((bool)registered.GetValue(hotkey)!);
+            Assert.False(overlay.IsVisible);
+            Assert.Empty(scenario.Composer.Writes);
+        });
+    }
+
+    [Fact]
     public void OpenSettings_PreventsCorrectionFromRunning()
     {
         RunOnSta(dispatcher =>
@@ -24,7 +73,9 @@ public sealed class CoordinatorPreparationTests
             scenario.Composer.Current = Snapshot("Das ist ein fehler.");
             typeof(CorrectionCoordinator).GetField("_settingsOpen", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .SetValue(scenario.Coordinator, true);
-            InvokeManualCorrection(scenario.Coordinator).GetAwaiter().GetResult();
+            var correction = InvokeManualCorrection(scenario.Coordinator);
+            Assert.True(PumpUntil(dispatcher, () => correction.IsCompleted, DispatcherTimeout));
+            correction.GetAwaiter().GetResult();
             Assert.Equal(0, scenario.Luna.RequestCount);
             Assert.Empty(scenario.Composer.Writes);
         });
@@ -85,7 +136,8 @@ public sealed class CoordinatorPreparationTests
                 .GetMethod("OnMessage", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(hotkey, messageArgs);
             Assert.True((bool)messageArgs[4]);
-            Assert.True(PumpUntil(dispatcher, () => scenario.Composer.Writes.Count == 1, DispatcherTimeout));
+            Assert.True(PumpUntil(dispatcher, () => scenario.Composer.Writes.Count == 1 && !(bool)typeof(CorrectionCoordinator)
+                .GetField("_busy", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!, DispatcherTimeout));
             Assert.Equal(Corrected(snapshot.Text), scenario.Composer.Current!.Text);
             InvokeCoordinatorMethod(scenario.Coordinator, "Undo");
             Assert.Equal(snapshot.Text, scenario.Composer.Current!.Text);
@@ -244,11 +296,116 @@ public sealed class CoordinatorPreparationTests
             scenario.Composer.Current = snapshot;
             scenario.Luna.FailImmediately(snapshot.Text);
 
-            InvokeManualCorrection(scenario.Coordinator).GetAwaiter().GetResult();
+            var correction = InvokeManualCorrection(scenario.Coordinator);
+            Assert.True(PumpUntil(dispatcher, () => correction.IsCompleted, DispatcherTimeout));
+            correction.GetAwaiter().GetResult();
 
             Assert.Equal(snapshot.Text, scenario.Composer.Current!.Text);
             Assert.Empty(scenario.Composer.Writes);
             Assert.Contains("Correction unavailable", scenario.LastStatus);
+        });
+    }
+
+    [Fact]
+    public void GeometryRefreshKeepsVisibleButtonUntilValidatedReplacementButFocusLossHidesIt()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            using var release = new ManualResetEventSlim();
+            scenario.Composer.OnPoll = () => release.Wait();
+            var overlay = (OverlayWindow)typeof(CorrectionCoordinator)
+                .GetField("_overlay", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!;
+            overlay.Show();
+            try
+            {
+                InvokeCoordinatorMethod(scenario.Coordinator, "FocusWatcher_OnChanged", null,
+                    new CodexLanguageFix.Windows.ComposerChangeEventArgs(false));
+                Assert.True(overlay.IsVisible);
+                InvokeCoordinatorMethod(scenario.Coordinator, "FocusWatcher_OnChanged", null,
+                    new CodexLanguageFix.Windows.ComposerChangeEventArgs(true));
+                Assert.False(overlay.IsVisible);
+            }
+            finally { release.Set(); }
+            Assert.True(PumpUntil(dispatcher, () => !(bool)typeof(CorrectionCoordinator)
+                .GetField("_refreshing", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!, DispatcherTimeout));
+        });
+    }
+
+    [Fact]
+    public void GeometryUpdateKeepsShortcutRegisteredWhileCaptureIsPending()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            using var release = new ManualResetEventSlim();
+            scenario.Composer.OnPoll = () => release.Wait();
+            var hotkey = (CodexLanguageFix.Windows.CorrectionHotkey)typeof(CorrectionCoordinator)
+                .GetField("_hotkey", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!;
+            Assert.True(hotkey.SetShortcut(new CorrectionShortcut(0, 0x85)));
+            Assert.True(hotkey.SetEnabled(true));
+            try
+            {
+                InvokeCoordinatorMethod(scenario.Coordinator, "FocusWatcher_OnChanged", null,
+                    new CodexLanguageFix.Windows.ComposerChangeEventArgs(false));
+                Assert.Equal(0L, typeof(CorrectionCoordinator).GetField("_focusGeneration", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator));
+                Assert.True((bool)typeof(CodexLanguageFix.Windows.CorrectionHotkey).GetField("_registered", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hotkey)!);
+                InvokeCoordinatorMethod(scenario.Coordinator, "FocusWatcher_OnChanged", null,
+                    new CodexLanguageFix.Windows.ComposerChangeEventArgs(true));
+                Assert.False((bool)typeof(CodexLanguageFix.Windows.CorrectionHotkey).GetField("_registered", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hotkey)!);
+            }
+            finally { release.Set(); }
+            Assert.True(PumpUntil(dispatcher, () => !(bool)typeof(CorrectionCoordinator)
+                .GetField("_refreshing", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scenario.Coordinator)!, DispatcherTimeout));
+        });
+    }
+
+    [Fact]
+    public void FocusChangeDuringCaptureRejectsStaleResultBeforeProviderRequest()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            scenario.Composer.Current = Snapshot("Original");
+            scenario.Composer.OnCapture = () => { entered.Set(); release.Wait(); };
+            var correction = InvokeManualCorrection(scenario.Coordinator);
+            try
+            {
+                Assert.True(entered.Wait(TimeSpan.FromSeconds(3)));
+                InvokeCoordinatorMethod(scenario.Coordinator, "FocusWatcher_OnChanged", null, EventArgs.Empty);
+            }
+            finally { release.Set(); }
+            Assert.True(PumpUntil(dispatcher, () => correction.IsCompleted, DispatcherTimeout));
+            correction.GetAwaiter().GetResult();
+            Assert.Equal(0, scenario.Luna.RequestCount);
+            Assert.Empty(scenario.Composer.Writes);
+        });
+    }
+
+    [Fact]
+    public void RepeatedClickWhileCaptureIsPendingDoesNotQueueAnotherCorrection()
+    {
+        RunOnSta(dispatcher =>
+        {
+            using var scenario = new Scenario();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            scenario.Composer.Current = Snapshot("Original");
+            scenario.Luna.CompleteImmediately("Original");
+            scenario.Composer.OnCapture = () => { entered.Set(); release.Wait(); };
+            var first = InvokeManualCorrection(scenario.Coordinator);
+            try
+            {
+                Assert.True(entered.Wait(TimeSpan.FromSeconds(3)));
+                Assert.True(InvokeManualCorrection(scenario.Coordinator).IsCompletedSuccessfully);
+            }
+            finally { release.Set(); }
+            Assert.True(PumpUntil(dispatcher, () => first.IsCompleted, DispatcherTimeout));
+            first.GetAwaiter().GetResult();
+            Assert.Equal(1, scenario.Luna.RequestCount);
+            Assert.Single(scenario.Composer.Writes);
         });
     }
 
@@ -334,10 +491,17 @@ public sealed class CoordinatorPreparationTests
             .GetMethod("CorrectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(coordinator, [false])!;
 
-    private static void InvokeCoordinatorMethod(CorrectionCoordinator coordinator, string methodName, params object?[] args) =>
-        typeof(CorrectionCoordinator)
+    private static void InvokeCoordinatorMethod(CorrectionCoordinator coordinator, string methodName, params object?[] args)
+    {
+        var result = typeof(CorrectionCoordinator)
             .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(coordinator, args);
+        if (result is Task task)
+        {
+            Assert.True(PumpUntil(Dispatcher.CurrentDispatcher, () => task.IsCompleted, DispatcherTimeout));
+            task.GetAwaiter().GetResult();
+        }
+    }
 
     private static bool PumpUntil(Dispatcher dispatcher, Func<bool> condition, TimeSpan timeout)
     {
@@ -453,11 +617,17 @@ public sealed class CoordinatorPreparationTests
     private sealed class ComposerAccessor : IComposerAccessor
     {
         public ComposerSnapshot? Current { get; set; }
+        public Action? OnCapture { get; set; }
+        public Action? OnPoll { get; set; }
         public List<Write> Writes { get; } = [];
 
         public ComposerSnapshot? TryCaptureFocusedComposer() => Current;
-        public ComposerSnapshot? TryCaptureFocusedComposerWithoutLayout(bool requireKeyboardFocus = false) => Current;
-        public ComposerSnapshot? TryPollFocusedComposer() => Current;
+        public ComposerSnapshot? TryCaptureFocusedComposerWithoutLayout(bool requireKeyboardFocus = false)
+        {
+            OnCapture?.Invoke();
+            return Current;
+        }
+        public ComposerSnapshot? TryPollFocusedComposer() { OnPoll?.Invoke(); return Current; }
         public void InvalidateLayout() { }
 
         public ComposerSnapshot? TryRefresh(ComposerSnapshot snapshot) =>

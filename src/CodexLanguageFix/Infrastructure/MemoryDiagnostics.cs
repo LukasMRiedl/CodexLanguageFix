@@ -9,7 +9,7 @@ internal sealed class MemoryDiagnostics : EventSource
 {
     private readonly PollingCounter[] _counters;
 
-    public MemoryDiagnostics(CodexComposerAccessor accessor)
+    public MemoryDiagnostics(IsolatedComposerAccessor accessor)
     {
         _counters =
         [

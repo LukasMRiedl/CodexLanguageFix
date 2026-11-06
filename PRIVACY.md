@@ -37,3 +37,13 @@ The app does not offer an OpenAI logout command because the OAuth session is sha
 Exit the app from its system tray menu, then delete the application folder. Settings and diagnostic logs are stored under `%LOCALAPPDATA%\CodexLanguageFix` and can be deleted separately.
 
 The shortcut recorder handles key combinations only while its manually opened recording UI is active. Only the selected modifiers and virtual-key code are stored in the existing local settings file. This does not add a global keyboard hook or a keystroke log. The app does not display automatic Windows notification balloons; its latest status is kept in memory and is available in the manually opened Settings dialog.
+
+## Windows and Chrome development candidate
+
+The unreleased Windows/Chrome candidate extends eligible fields beyond the original three desktop applications. If preparation is enabled, eligible focused fields in newly supported programs and websites are also sent to Codex after 1.2 seconds of stable text. Preparation does not insert corrections automatically. Passwords and recognized credential, payment, code and command fields are excluded before browser text capture.
+
+The optional Chrome extension holds only the active editor state, its prepared result and undo/recovery data in memory. It communicates through Chrome Native Messaging and a current-user-only named pipe with the desktop app, using the same correction provider. No OAuth tokens or account credentials are passed to the extension. If a page normalizes an attempted edit and verification fails, the original is retained in memory for explicit recovery; the user can display it inline at Aa. This does not write a recovery file, copy to the clipboard or open an automatic notification.
+
+Native Windows field access runs in a separate local child process. Field text and verified changes cross private redirected process streams and remain in memory. Native UI Automation objects stay inside that process. Diagnostic phase markers use a fixed set of technical names and contain no field text. Failed or interrupted writes are not automatically replayed.
+
+Chrome's HTTP/HTTPS content-script access is required for the supported website fields. Internal Chrome pages, local files and Incognito are excluded. Remove the extension in Chrome and run the matching `scripts/uninstall-native-host.ps1` with its installed host executable path to remove only this native-host registration. These additions remain subject to the acceptance gates documented in `docs/windows-chrome-1.6.0.md`.

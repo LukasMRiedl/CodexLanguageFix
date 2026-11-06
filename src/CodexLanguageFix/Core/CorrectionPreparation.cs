@@ -118,7 +118,9 @@ internal sealed class CorrectionPreparation : IDisposable
         Diagnostic?.Invoke("preparation_started", operation.Snapshot.Text.Length, TimeSpan.Zero);
         try
         {
-            await _provider.CorrectAsync(operation.Snapshot.Text, operation.Cancellation.Token);
+            await (_provider is IPreparationCorrectionProvider preparing
+                ? preparing.PrepareAsync(operation.Snapshot.Text, operation.Cancellation.Token)
+                : _provider.CorrectAsync(operation.Snapshot.Text, operation.Cancellation.Token));
             lock (_gate)
             {
                 operation.Cancellation.Token.ThrowIfCancellationRequested();

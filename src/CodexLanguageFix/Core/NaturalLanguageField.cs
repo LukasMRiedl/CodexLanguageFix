@@ -50,14 +50,15 @@ internal static class NaturalLanguageField
         "Suchen", "Name", "Titel", "Spitzname", "Beruf", "Projektname",
         "Pfad", "Dateipfad", "Ordnerpfad", "API-Schlüssel",
         "Zugriffstoken", "Passwort", "Authentifizierung", "Einstellungen", "Konfiguration",
-        "Befehl", "Endpunkt", "Modell", "Arbeitsbereich", "Verzeichnis", "Dateiname");
+        "Befehl", "Endpunkt", "Modell", "Arbeitsbereich", "Verzeichnis", "Dateiname",
+        "PIN", "OTP", "CVV", "CVC", "IBAN", "Credit card", "Card number", "Kreditkarte", "Kartennummer", "Benutzername", "Username", "Verification code", "Bestätigungscode");
 
     private static readonly HashSet<string> TechnicalIdTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "search", "name", "title", "path", "url", "uri", "auth", "password", "secret", "token",
         "key", "code", "json", "setting", "settings", "config", "configuration", "endpoint",
         "command", "shell", "terminal", "model", "workspace", "directory", "filename", "query",
-        "sql", "regex", "expression", "nickname", "occupation"
+        "sql", "regex", "expression", "nickname", "occupation", "otp", "pin", "cvv", "cvc", "iban", "creditcard", "cardnumber", "payment", "username", "login"
     };
 
     private static readonly HashSet<string> CodeEditorClasses = new(StringComparer.OrdinalIgnoreCase)
@@ -91,6 +92,7 @@ internal static class NaturalLanguageField
             ComposerHost.Hermes => HermesAutomationIds.Contains(normalizedId)
                 || HermesLabels.Contains(normalizedName)
                 || HermesLabels.Contains(normalizedLabel),
+            ComposerHost.Windows => true,
             _ => false
         };
     }

@@ -12,6 +12,10 @@ namespace CodexLanguageFix.Windows;
 
 public sealed class CodexComposerAccessor : IComposerAccessor
 {
+    private readonly Action<string>? _nativePhase;
+
+    public CodexComposerAccessor(Action<string>? nativePhase = null) => _nativePhase = nativePhase;
+
     private ComposerSnapshot? _lastAppliedEditor;
     private ComposerEditPlan? _lastAppliedPlan;
     public string LastWriteStatus { get; private set; } = "not_attempted";
@@ -19,7 +23,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     public string LastCaptureStatus { get; private set; } = "not_attempted";
     public ComposerHost? LastCaptureHost { get; private set; }
     public string? LastFieldCategory { get; private set; }
-    internal bool LastCaptureWasKeyboardFocused { get; private set; }
+    public bool LastCaptureWasKeyboardFocused { get; private set; }
     internal static int NativeInputSize => UnicodeInput.StructSize;
 
     private readonly ComposerLayoutCache _layoutCache = new();
@@ -82,6 +86,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 LastCaptureStatus = "no_keyboard_focused_composer";
                 return null;
             }
+            if (LastCaptureHost == ComposerHost.Windows) return null;
             return TryCaptureActiveWindowComposer(focused, includeLayout, reuseLayout);
         }
         catch (ElementNotAvailableException)
@@ -249,6 +254,12 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             && ((ValuePattern)value).Current.IsReadOnly) return false;
         if (element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern)
             && ((TextPattern)textPattern).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute) is true) return false;
+        if (host == ComposerHost.Windows)
+            return IsWindowsTextField(element.Current.ControlType, element.Current.ClassName,
+                    value is ValuePattern writableValue && !writableValue.Current.IsReadOnly)
+                && element.Current.HasKeyboardFocus
+                && NaturalLanguageField.IsSupported(host, element.Current.ClassName,
+                    element.Current.AutomationId, element.Current.Name, element.Current.LabeledBy?.Current.Name);
         if (IsComposerShapeForHost(element, host)) return true;
         if (host == ComposerHost.Antigravity || element.Current.ControlType != ControlType.Edit) return false;
         var label = element.Current.LabeledBy?.Current.Name;
@@ -355,7 +366,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                 return Failed("focus_changed_" + FocusDiagnostic(element, snapshot.HostWindow));
             }
 
-            var target = new NativeEditTarget(snapshot, element);
+            var target = new NativeEditTarget(snapshot, element, _nativePhase);
             if (snapshot.ReadMethod == ComposerReadMethod.ValuePattern)
             {
                 plan = new ComposerEditPlan(expectedText, replacement,
@@ -422,7 +433,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             return false;
         }
 
-        return type == ControlType.Edit || hasWritableValue || hasValuePattern
+        return type == ControlType.Edit || IsNativeRichText(type, className) || hasWritableValue || hasValuePattern
             || element.TryGetCurrentPattern(TextPattern.Pattern, out _);
     }
 
@@ -430,8 +441,21 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         ControlType type, string? className, string? automationId, bool hasWritableValue) =>
         !(type == ControlType.Document
             && string.Equals(automationId, "RootWebArea", StringComparison.OrdinalIgnoreCase))
-        && (type == ControlType.Edit || hasWritableValue
+        && (type == ControlType.Edit || IsNativeRichText(type, className) || hasWritableValue
             || IsSupportedComposerShape(type, className, automationId));
+
+    internal static bool IsWindowsTextField(ControlType type, string? className, bool hasWritableValue) =>
+        IsNativeRichText(type, className)
+        || (type == ControlType.Edit && (hasWritableValue
+            || string.Equals(className, "Edit", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(className, "TextBox", StringComparison.OrdinalIgnoreCase)
+            || className?.StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase) == true
+            || className?.StartsWith("WindowsForms10.EDIT.", StringComparison.OrdinalIgnoreCase) == true
+            || className?.StartsWith("WindowsForms10.RichEdit", StringComparison.OrdinalIgnoreCase) == true));
+
+    internal static bool IsNativeRichText(ControlType type, string? className) =>
+        type == ControlType.Document && (className?.StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase) == true
+            || string.Equals(className, "RichTextBox", StringComparison.OrdinalIgnoreCase));
 
     internal static bool IsSupportedComposerShape(ControlType type, string? className, string? automationId)
     {
@@ -464,7 +488,18 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private static ComposerHost? TryGetComposerHost(AutomationElement element) => TryGetComposerHost(element.Current.ProcessId);
 
-    private static ComposerHost? TryGetComposerHost(int processId) => ComposerHostProcess.Identify(processId);
+    private static ComposerHost? TryGetComposerHost(int processId)
+    {
+        var known = ComposerHostProcess.Identify(processId);
+        if (known is not null) return known;
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (processId == Environment.ProcessId || process.ProcessName.Equals("chrome", StringComparison.OrdinalIgnoreCase)) return null;
+            return ComposerHost.Windows;
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception) { return null; }
+    }
 
     private ComposerSnapshot? CreateSnapshot(
         AutomationElement element,
@@ -572,7 +607,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             RightControlBounds = toolbar.RightControlBounds,
             OccupiedBounds = toolbar.OccupiedBounds,
             PlacementBounds = placementBounds,
-            EditorTextBounds = host == ComposerHost.Codex
+            EditorTextBounds = (host == ComposerHost.Codex || host == ComposerHost.Windows)
                 && TryGetVisibleTextBounds(element, null) is { Count: > 0 } textBounds
                     ? textBounds : null
         };
@@ -588,12 +623,17 @@ public sealed class CodexComposerAccessor : IComposerAccessor
     private static (Rect? Bounds, IReadOnlyList<Rect>? Obstacles) CapturePlacementContext(
         AutomationElement editor, Rect editorBounds, nint window, uint dpi)
     {
-        var document = FindDocumentRoot(editor);
-        if (document is null || window == 0 || dpi == 0) return default;
+        if (window == 0 || dpi == 0) return default;
+        var document = FindDocumentRoot(editor) ?? AutomationElement.FromHandle(window);
         var windowRoot = AutomationElement.FromHandle(window);
         var available = Rect.Intersect(document.Current.BoundingRectangle, windowRoot.Current.BoundingRectangle);
         var scope = document;
         var parent = TreeWalker.ControlViewWalker.GetParent(editor);
+        if (parent is not null && parent.Current.BoundingRectangle.Contains(editorBounds))
+        {
+            scope = parent;
+            available.Intersect(parent.Current.BoundingRectangle);
+        }
         for (var depth = 0; depth < 20 && parent is not null; depth++)
         {
             if (IsSameRuntimeId(parent.GetRuntimeId(), document.GetRuntimeId())) break;
@@ -917,13 +957,15 @@ public sealed class CodexComposerAccessor : IComposerAccessor
         if (!isStructured && element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
         {
             readMethod = ComposerReadMethod.ValuePattern;
-            return ((ValuePattern)valuePatternObject).Current.Value;
+            var value = ((ValuePattern)valuePatternObject).Current.Value;
+            return value.Length <= 20_000 ? value : null;
         }
 
         if (element.TryGetCurrentPattern(TextPattern.Pattern, out var textPatternObject))
         {
             readMethod = ComposerReadMethod.TextPattern;
-            return ((TextPattern)textPatternObject).DocumentRange.GetText(-1);
+            var value = ((TextPattern)textPatternObject).DocumentRange.GetText(20_001);
+            return value.Length <= 20_000 ? value : null;
         }
 
         readMethod = ComposerReadMethod.Unknown;
@@ -995,7 +1037,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             + $"_type_{focused?.Current.ControlType.Id ?? 0}";
     }
 
-    private sealed class NativeEditTarget(ComposerSnapshot snapshot, AutomationElement element)
+    private sealed class NativeEditTarget(ComposerSnapshot snapshot, AutomationElement element, Action<string>? nativePhase)
         : IComposerEditTarget
     {
         public string LastStatus { get; private set; } = "not_attempted";
@@ -1112,14 +1154,31 @@ public sealed class CodexComposerAccessor : IComposerAccessor
                         var suffix = document.Clone();
                         suffix.MoveEndpointByRange(TextPatternRangeEndpoint.Start,
                             selection[0], TextPatternRangeEndpoint.End);
+                        // Read a document-owned range with the actual selection's endpoints.
+                        // GetText on the native GetSelection range crashes on this Windows provider.
+                        nativePhase?.Invoke("selection_selected");
+                        var selected = document.Clone();
+                        selected.MoveEndpointByRange(TextPatternRangeEndpoint.End,
+                            selection[0], TextPatternRangeEndpoint.End);
+                        selected.MoveEndpointByRange(TextPatternRangeEndpoint.Start,
+                            selection[0], TextPatternRangeEndpoint.Start);
                         if (!ComposerTextRangeMapping.MatchesSelection(before, selectedStart, selectedText,
-                            document.GetText(-1), prefix.GetText(-1), through.GetText(-1),
-                            selection[0].GetText(-1), suffix.GetText(-1)))
+                            ReadSelectionRange(document, "selection_document"),
+                            ReadSelectionRange(prefix, "selection_prefix"),
+                            ReadSelectionRange(through, "selection_through"),
+                            ReadSelectionRange(selected, "selection_selected"),
+                            ReadSelectionRange(suffix, "selection_suffix")))
                             result = ComposerSelectionCheck.TextMismatch;
                     }
                     if (!IsCurrentEditor) return ComposerSelectionCheck.EditorChanged;
                     if (Read() != before) return ComposerSelectionCheck.SourceChanged;
                     return result;
+                }
+
+                string ReadSelectionRange(TextPatternRange textRange, string phase)
+                {
+                    nativePhase?.Invoke(phase);
+                    return textRange.GetText(before.Length + 1);
                 }
             }
 

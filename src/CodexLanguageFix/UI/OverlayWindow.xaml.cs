@@ -173,7 +173,7 @@ public partial class OverlayWindow : Window
         // Without a separately identified editor the entire composer is protected.
         var placement = OverlayPlacement.Find(composerBounds, editorBounds ?? composerBounds,
             obstacles, screen, scale, rightControlBounds, placementBounds,
-            host == ComposerHost.Codex ? editorTextBounds : null);
+            host is ComposerHost.Codex or ComposerHost.Windows ? editorTextBounds : null);
         if (placement is not { } bounds)
         {
             PlacementStatus = "no_safe_space";

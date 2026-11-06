@@ -1,10 +1,14 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexLanguageFix", "src\CodexLanguageFix\CodexLanguageFix.csproj", "{D50ADDD5-5429-4D5F-BC5A-83D1AE23D70F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexLanguageFix.Tests", "tests\CodexLanguageFix.Tests\CodexLanguageFix.Tests.csproj", "{B48396D8-26EB-42C1-AF7F-DBBBF36E34DD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{1B1CC869-55D6-47AF-A9A9-E384C04AD559}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexLanguageFix.NativeHost", "src\CodexLanguageFix.NativeHost\CodexLanguageFix.NativeHost.csproj", "{C5653C84-2B66-4F78-B2F9-FA672E947C2B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -20,5 +24,12 @@ Global
 		{B48396D8-26EB-42C1-AF7F-DBBBF36E34DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B48396D8-26EB-42C1-AF7F-DBBBF36E34DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B48396D8-26EB-42C1-AF7F-DBBBF36E34DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C5653C84-2B66-4F78-B2F9-FA672E947C2B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C5653C84-2B66-4F78-B2F9-FA672E947C2B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C5653C84-2B66-4F78-B2F9-FA672E947C2B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C5653C84-2B66-4F78-B2F9-FA672E947C2B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C5653C84-2B66-4F78-B2F9-FA672E947C2B} = {1B1CC869-55D6-47AF-A9A9-E384C04AD559}
 	EndGlobalSection
 EndGlobal

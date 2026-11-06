@@ -26,12 +26,15 @@ $desktop.Document.Application.ShellExecute($executable, '', [IO.Path]::GetDirect
 
 for ($attempt = 0; $attempt -lt 50; $attempt++) {
     $app = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable })
-    if ($app.Count -eq 1) {
-        $created = Get-CimInstance Win32_Process -Filter "ProcessId=$($app[0].Id)"
-        if ($created.ParentProcessId -notin $explorerIds) {
-            throw "The app started, but its Explorer parent could not be verified (PID $($app[0].Id))."
-        }
-        return $app[0].Id
+    $main = @($app | ForEach-Object {
+        $created = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)"
+        if ($created.ParentProcessId -in $explorerIds) { $_ }
+    })
+    if ($main.Count -eq 1) {
+        return $main[0].Id
+    }
+    if ($main.Count -gt 1) {
+        throw 'More than one Explorer-launched app process was found.'
     }
     Start-Sleep -Milliseconds 100
 }

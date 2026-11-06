@@ -11,6 +11,11 @@ public interface ICorrectionProvider
     Task<CorrectionProviderHealth> TestAsync(CancellationToken cancellationToken);
 }
 
+public interface IPreparationCorrectionProvider : ICorrectionProvider
+{
+    Task<CorrectionProviderResult> PrepareAsync(string text, CancellationToken cancellationToken);
+}
+
 public interface IOpenAiConnection
 {
     Task ConnectAsync(CancellationToken cancellationToken);

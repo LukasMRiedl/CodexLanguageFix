@@ -400,10 +400,8 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         var processes = Process.GetProcessesByName("CodexLanguageFix");
         try
         {
-            Assert.True(processes.Length == 1,
-                "Für den Live-Test muss genau ein CodexLanguageFix-Appprozess laufen.");
-            var app = processes[0];
             var localizer = new AppLocalizer(new SettingsService().Load().Language);
+            var app = LiveDesktopAppProcess.FindOverlayOwner(processes, localizer.Get(AppText.CorrectAutomationName));
             var correct = WaitForButton(app, localizer.Get(AppText.CorrectAutomationName));
             AssertCurrentText(originalText);
             var correctWindow = OwnButtonWindow(app, correct);

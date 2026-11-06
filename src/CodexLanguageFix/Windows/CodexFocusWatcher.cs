@@ -16,6 +16,9 @@ public sealed class CodexFocusWatcher : IDisposable
     private const uint EventSystemMinimizeEnd = 0x0017;
     private const uint WineventOutOfContext = 0x0000;
     private const uint GaRoot = 2;
+    private const int ObjIdCaret = -8;
+    private const int ObjIdCursor = -9;
+    private const uint EventObjectContentScrolled = 0x8015;
 
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _notificationTimer;
@@ -24,6 +27,7 @@ public sealed class CodexFocusWatcher : IDisposable
     private readonly List<nint> _hooks = [];
     private DispatcherOperation? _startNotification;
     private bool _notificationPending;
+    private bool _focusChangePending;
     private bool _disposed;
 
     public CodexFocusWatcher(Dispatcher dispatcher)
@@ -43,6 +47,7 @@ public sealed class CodexFocusWatcher : IDisposable
         AddHook(EventObjectReorder);
         AddHook(EventObjectFocus);
         AddHook(EventObjectLocationChange);
+        AddHook(EventObjectContentScrolled);
         AddHook(EventSystemMinimizeStart);
         AddHook(EventSystemMinimizeEnd);
     }
@@ -60,6 +65,8 @@ public sealed class CodexFocusWatcher : IDisposable
 
     private void OnWinEvent(nint hook, uint eventType, nint window, int objectId, int childId, uint eventThread, uint eventTime)
     {
+        // Caret blinking/movement is not an editor move or keyboard-focus transition.
+        if (objectId is ObjIdCaret or ObjIdCursor) return;
         if (eventType != EventSystemForeground && window != nint.Zero)
         {
             _ = GetWindowThreadProcessId(window, out var processId);
@@ -73,7 +80,9 @@ public sealed class CodexFocusWatcher : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || _notificationPending || _dispatcher.HasShutdownStarted) return;
+            if (_disposed || _dispatcher.HasShutdownStarted) return;
+            _focusChangePending |= IsFocusTransition(eventType);
+            if (_notificationPending) return;
             _notificationPending = true;
             _startNotification = _dispatcher.BeginInvoke(DispatcherPriority.Background, StartNotificationTimer);
         }
@@ -88,15 +97,21 @@ public sealed class CodexFocusWatcher : IDisposable
         }
     }
 
+    internal static bool IsFocusTransition(uint eventType) => eventType is EventSystemForeground
+        or EventObjectFocus or EventSystemMinimizeStart or EventSystemMinimizeEnd;
+
     private void OnNotificationTick(object? sender, EventArgs args)
     {
+        ComposerChangeEventArgs change;
         lock (_gate)
         {
             _notificationTimer.Stop();
             if (_disposed || !_notificationPending) return;
             _notificationPending = false;
-            Changed?.Invoke(this, EventArgs.Empty);
+            change = new ComposerChangeEventArgs(_focusChangePending);
+            _focusChangePending = false;
         }
+        Changed?.Invoke(this, change);
     }
 
     public void Dispose()
@@ -151,4 +166,9 @@ public sealed class CodexFocusWatcher : IDisposable
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnhookWinEvent(nint hook);
+}
+
+internal sealed class ComposerChangeEventArgs(bool focusChanged) : EventArgs
+{
+    internal bool FocusChanged { get; } = focusChanged;
 }
