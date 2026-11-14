@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Runtime.CompilerServices;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Core;
 
@@ -6,6 +7,46 @@ namespace CodexLanguageFix.Tests;
 
 public sealed class ComposerLayoutCacheTests
 {
+    [Fact]
+    public void WriteIdentityDoesNotKeepNativeEditorAlive()
+    {
+        var (identity, editor) = StoreWriteIdentity();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(editor.IsAlive);
+        Assert.True(identity.SameEditor(Snapshot()));
+        GC.KeepAlive(identity);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (ComposerEditorIdentity, WeakReference) StoreWriteIdentity()
+    {
+        var snapshot = Snapshot();
+        return (ComposerEditorIdentity.From(snapshot), new WeakReference(snapshot.NativeElement));
+    }
+
+    [Fact]
+    public void GeometryDoesNotKeepNativeEditorAlive()
+    {
+        var cache = new ComposerLayoutCache();
+        var editor = StoreNativeEditor(cache);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.False(editor.IsAlive);
+        Assert.NotNull(cache.TryApply(Snapshot(), 96));
+        GC.KeepAlive(cache);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference StoreNativeEditor(ComposerLayoutCache cache)
+    {
+        var snapshot = Snapshot();
+        cache.Store(snapshot, 96);
+        return new WeakReference(snapshot.NativeElement);
+    }
+
     private static ComposerSnapshot Snapshot() => new(new object(), [1, 2], "Text",
         new Rect(0, 0, 300, 160), 42, new Rect(200, 120, 60, 30),
         HostWindow: 123, EditorBounds: new Rect(0, 0, 300, 100),

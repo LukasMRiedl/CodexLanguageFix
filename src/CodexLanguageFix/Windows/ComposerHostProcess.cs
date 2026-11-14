@@ -44,48 +44,7 @@ internal static class ComposerHostProcess
             return ComposerHost.Codex;
         }
 
-        if (string.Equals(fileName, "Antigravity.exe", StringComparison.OrdinalIgnoreCase)
-            && path.Contains(@"\Programs\antigravity\", StringComparison.OrdinalIgnoreCase))
-        {
-            return ComposerHost.Antigravity;
-        }
-
-        if (string.Equals(fileName, "Hermes.exe", StringComparison.OrdinalIgnoreCase)
-            && IsKnownHermesPath(path))
-        {
-            return ComposerHost.Hermes;
-        }
-
         return null;
-    }
-
-    private static bool IsKnownHermesPath(string path)
-    {
-        string fullPath;
-        try
-        {
-            fullPath = Path.GetFullPath(path);
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-
-        return MatchesKnownRoot(Environment.SpecialFolder.LocalApplicationData,
-                   @"Programs\Hermes\Hermes.exe", fullPath)
-            || MatchesKnownRoot(Environment.SpecialFolder.LocalApplicationData,
-                   @"hermes\hermes-agent\apps\desktop\release\win-unpacked\Hermes.exe", fullPath)
-            || MatchesKnownRoot(Environment.SpecialFolder.ProgramFiles,
-                   @"Hermes\Hermes.exe", fullPath)
-            || MatchesKnownRoot(Environment.SpecialFolder.ProgramFilesX86,
-                   @"Hermes\Hermes.exe", fullPath);
-    }
-
-    private static bool MatchesKnownRoot(Environment.SpecialFolder folder, string relativePath, string fullPath)
-    {
-        var root = Environment.GetFolderPath(folder);
-        return !string.IsNullOrWhiteSpace(root)
-            && string.Equals(fullPath, Path.Combine(root, relativePath), StringComparison.OrdinalIgnoreCase);
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

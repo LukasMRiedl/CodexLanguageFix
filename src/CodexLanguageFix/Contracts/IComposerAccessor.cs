@@ -47,6 +47,17 @@ public sealed record ComposerSnapshot(
         && RuntimeId.Length > 0 && RuntimeId.SequenceEqual(other.RuntimeId);
 }
 
+// Identity checks do not need to keep the editor's UIA provider alive.
+internal sealed record ComposerEditorIdentity(int[] RuntimeId, int ProcessId, ComposerHost Host, nint HostWindow)
+{
+    internal static ComposerEditorIdentity From(ComposerSnapshot snapshot) =>
+        new(snapshot.RuntimeId.ToArray(), snapshot.ProcessId, snapshot.Host, snapshot.HostWindow);
+
+    internal bool SameEditor(ComposerSnapshot? other) => other is not null
+        && Host == other.Host && ProcessId == other.ProcessId && HostWindow == other.HostWindow
+        && RuntimeId.Length > 0 && RuntimeId.SequenceEqual(other.RuntimeId);
+}
+
 public enum ComposerReadMethod { Unknown, ValuePattern, TextPattern }
 public enum ComposerWriteState { Unchanged, Applied, PartiallyApplied }
 public sealed record ComposerWriteResult(

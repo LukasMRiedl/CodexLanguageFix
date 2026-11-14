@@ -1,0 +1,4 @@
+# Preserve the qualified C# reference prompt's literal line endings.
+src/CodexLanguageFix/Infrastructure/LunaPromptCatalog.cs text eol=crlf
+native/third_party/nlohmann/json.hpp text eol=lf
+native/third_party/nlohmann/LICENSE.MIT -whitespace

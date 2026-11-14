@@ -11,6 +11,46 @@ namespace CodexLanguageFix.Tests;
 public sealed class LiveLunaResourceTests(ITestOutputHelper output)
 {
     [Fact]
+    public async Task RealLuna_CanceledTurnUnloadsAndNextCorrectionRemainsUsable()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_LUNA_RESOURCE_LIVE_TEST") != "1")
+            return;
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var client = new CodexAppServerClient(LunaLiveRuntime.CreateDirectory());
+        await client.WarmUpAsync(timeout.Token);
+        var connection = Assert.IsType<JsonRpcLineConnection>(typeof(CodexAppServerClient)
+            .GetField("_connection", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client));
+        var provider = new LunaCorrectionProvider(client, new AppLocalizer(), cacheEnabled: false);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var pending = provider.CorrectAsync("Das ist ein fehler.", cancellation.Token);
+        var turns = (System.Collections.ICollection)typeof(CodexAppServerClient)
+            .GetField("_turns", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!;
+        // Cancel an actual started turn, rather than a request that never left warmup.
+        while (turns.Count == 0)
+        {
+            Assert.False(pending.IsCompleted, "The synthetic turn finished before cancellation could be tested.");
+            await Task.Delay(10, timeout.Token);
+        }
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        await client.WarmUpAsync(timeout.Token);
+        var unloadDeadline = Stopwatch.StartNew();
+        var loadedThreadCount = int.MaxValue;
+        while (unloadDeadline.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            var loaded = await connection.RequestAsync("thread/loaded/list", new { }, timeout.Token);
+            loadedThreadCount = loaded.GetProperty("data").GetArrayLength();
+            if (loadedThreadCount == 1) break;
+            await Task.Delay(50, timeout.Token);
+        }
+        Assert.Equal(1, loadedThreadCount);
+        var next = await provider.CorrectAsync("Das ist ein fehler.", timeout.Token);
+        Assert.Equal("Das ist ein Fehler.", next.CorrectedText);
+        output.WriteLine("Started synthetic turn canceled; only next prepared thread retained; next correction exact.");
+    }
+
+    [Fact]
     public async Task RealLuna_RepeatedCorrectionsDoNotStartToolProcesses()
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_LUNA_RESOURCE_LIVE_TEST") != "1")
@@ -20,6 +60,11 @@ public sealed class LiveLunaResourceTests(ITestOutputHelper output)
         await client.WarmUpAsync(CancellationToken.None);
         var process = Assert.IsType<Process>(typeof(CodexAppServerClient)
             .GetField("_process", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client));
+        Assert.Contains("thread_unload_delay_secs=0", process.StartInfo.ArgumentList);
+        var connection = Assert.IsType<JsonRpcLineConnection>(typeof(CodexAppServerClient)
+            .GetField("_connection", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client));
+        var config = await connection.RequestAsync("config/read", new { includeLayers = false }, CancellationToken.None);
+        Assert.Equal(0, config.GetProperty("config").GetProperty("thread_unload_delay_secs").GetInt32());
         var provider = new LunaCorrectionProvider(client, new AppLocalizer(), cacheEnabled: false);
         var observations = new List<object>();
         for (var iteration = 0; iteration < 6; iteration++)
@@ -27,6 +72,16 @@ public sealed class LiveLunaResourceTests(ITestOutputHelper output)
             var result = await provider.CorrectAsync("Das ist ein fehler.", CancellationToken.None);
             Assert.Equal("Das ist ein Fehler.", result.CorrectedText);
             await client.WarmUpAsync(CancellationToken.None);
+            var unloadDeadline = Stopwatch.StartNew();
+            var loadedThreadCount = int.MaxValue;
+            while (unloadDeadline.Elapsed < TimeSpan.FromSeconds(5))
+            {
+                var loaded = await connection.RequestAsync("thread/loaded/list", new { }, CancellationToken.None);
+                loadedThreadCount = loaded.GetProperty("data").GetArrayLength();
+                if (loadedThreadCount <= 1) break;
+                await Task.Delay(50);
+            }
+            Assert.Equal(1, loadedThreadCount); // The prepared next correction must remain usable.
             var children = ChildProcesses(process.Id);
             process.Refresh();
             observations.Add(new
@@ -34,6 +89,7 @@ public sealed class LiveLunaResourceTests(ITestOutputHelper output)
                 iteration,
                 serverWorkingSetBytes = process.WorkingSet64,
                 serverPrivateBytes = process.PrivateMemorySize64,
+                loadedThreadCount,
                 childCount = children.Count,
                 toolProcessCount = children.Count(name => name != "conhost.exe")
             });

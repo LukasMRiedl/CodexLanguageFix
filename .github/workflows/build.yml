@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -19,10 +19,16 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet restore .\CodexLanguageFix.sln
       - run: dotnet test .\CodexLanguageFix.sln --no-restore --configuration Release
-      - run: >-
-          dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj
-          --configuration Release
-          --runtime win-x64
-          --self-contained true
-          -p:PublishSingleFile=true
-          --no-restore
+      - name: Build and test native product
+        shell: pwsh
+        run: .\scripts\build-native.ps1
+      - name: Build retained C# test oracle
+        run: dotnet build .\native\tests\reference\NativeReference.csproj -c Release
+      - name: Compare pure operations and validate worker protocol
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path benchmark-results -Force | Out-Null
+          python native/tests/run_differential.py --native native/build/Release/native_differential.exe --reference native/tests/reference/bin/Release/net8.0-windows/win-x64/CodexLanguageFix.Tests.exe --report benchmark-results/native-differential.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python native/tests/test_worker_protocol.py --exe native/build/Release/CodexLanguageFix.exe --report benchmark-results/native-worker-protocol.json
+          exit $LASTEXITCODE

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodexLanguageFix.Contracts;
 using CodexLanguageFix.Windows;
 
@@ -9,15 +10,13 @@ public sealed class ComposerHostProcessTests
     [InlineData(@"C:\Program Files\WindowsApps\OpenAI.Codex_1.0_x64\app\ChatGPT.exe", ComposerHost.Codex)]
     [InlineData(@"C:\Users\Example\AppData\Local\OpenAI\Codex\ChatGPT.exe", ComposerHost.Codex)]
     [InlineData(@"C:\OPENAI\CODEX\CHATGPT.EXE", ComposerHost.Codex)]
-    [InlineData(@"C:\Users\Example\AppData\Local\Programs\antigravity\Antigravity.exe", ComposerHost.Antigravity)]
-    [InlineData(@"C:\PROGRAMS\ANTIGRAVITY\ANTIGRAVITY.EXE", ComposerHost.Antigravity)]
     public void RecognizesExistingHostPaths(string path, ComposerHost expected)
     {
         Assert.Equal(expected, ComposerHostProcess.IdentifyPath(path));
     }
 
     [Fact]
-    public void RecognizesHermesOnlyAtKnownExactInstallPaths()
+    public void RejectsHermesAlsoAtItsFormerInstallPaths()
     {
         var paths = new[]
         {
@@ -30,7 +29,7 @@ public sealed class ComposerHostProcessTests
 
         Assert.NotEmpty(paths);
         foreach (var path in paths)
-            Assert.Equal(ComposerHost.Hermes, ComposerHostProcess.IdentifyPath(path));
+            Assert.Null(ComposerHostProcess.IdentifyPath(path));
     }
 
     [Theory]
@@ -40,6 +39,11 @@ public sealed class ComposerHostProcessTests
     [InlineData(@"C:\Other\ChatGPT.exe")]
     [InlineData(@"C:\Other\Antigravity.exe")]
     [InlineData(@"C:\Other\Hermes.exe")]
+    [InlineData(@"C:\Users\Example\AppData\Local\Programs\antigravity\Antigravity.exe")]
+    [InlineData(@"C:\PROGRAMS\ANTIGRAVITY\ANTIGRAVITY.EXE")]
+    [InlineData(@"C:\Windows\System32\notepad.exe")]
+    [InlineData(@"C:\Program Files\Google\Chrome\Application\chrome.exe")]
+    [InlineData(@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")]
     [InlineData(@"C:\OpenAI\Codex\Other.exe")]
     [InlineData(@"C:\OpenAI\Codex\ChatGPT.exe.bak")]
     [InlineData(@"C:\OpenAI\CodexOther\ChatGPT.exe")]
@@ -63,6 +67,39 @@ public sealed class ComposerHostProcessTests
     public void OwnTestProcessIsNotAComposerHost()
     {
         Assert.Null(ComposerHostProcess.Identify(Environment.ProcessId));
+        Assert.Null(CodexComposerAccessor.TryGetComposerHost(Environment.ProcessId));
+    }
+
+    [Fact]
+    public void ReachableForeignProcessDoesNotFallBackToWindowsHost()
+    {
+        var start = new ProcessStartInfo(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"))
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        start.ArgumentList.Add("/d");
+        start.ArgumentList.Add("/q");
+        using var foreign = Process.Start(start)!;
+        try
+        {
+            Assert.False(foreign.HasExited);
+            Assert.NotEqual(Environment.ProcessId, foreign.Id);
+            Assert.True(SpinWait.SpinUntil(() =>
+            {
+                foreign.Refresh();
+                return foreign.MainModule is not null || foreign.HasExited;
+            }, TimeSpan.FromSeconds(5)), "The foreign fixture's module must finish loading.");
+            Assert.False(foreign.HasExited);
+            Assert.Equal("cmd.exe", Path.GetFileName(foreign.MainModule!.FileName), StringComparer.OrdinalIgnoreCase);
+            Assert.Null(CodexComposerAccessor.TryGetComposerHost(foreign.Id));
+        }
+        finally
+        {
+            foreign.StandardInput.Close();
+            if (!foreign.WaitForExit(5000)) { foreign.Kill(); foreign.WaitForExit(); }
+        }
     }
 
     [Theory]

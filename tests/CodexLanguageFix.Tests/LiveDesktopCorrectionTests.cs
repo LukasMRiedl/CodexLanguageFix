@@ -307,29 +307,6 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
         RunOverlayRoundTrip(ParagraphFixtures, ComposerHost.Codex);
     }
 
-    // Opt in with ANTIGRAVITY_DESKTOP_LIVE_TEST=1 after preparing the exact sentence fixture in Antigravity.
-    [Fact]
-    public void PreparedSyntheticAntigravitySentence_IsCorrectedAndUndoneThroughOwnOverlay()
-    {
-        if (Environment.GetEnvironmentVariable("ANTIGRAVITY_DESKTOP_LIVE_TEST") != "1") return;
-        RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Antigravity);
-    }
-
-    // Opt in with HERMES_DESKTOP_LIVE_TEST=1 after preparing the exact sentence fixture in Hermes.
-    [Fact]
-    public void PreparedSyntheticHermesSentence_IsCorrectedAndUndoneThroughOwnOverlay()
-    {
-        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_LIVE_TEST") != "1") return;
-        RunOverlayRoundTrip(SentenceFixtures, ComposerHost.Hermes);
-    }
-
-    [Fact]
-    public void PreparedSyntheticHermesParagraphList_IsCorrectedAndUndoneThroughOwnOverlay()
-    {
-        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_PARAGRAPH_LIVE_TEST") != "1") return;
-        RunOverlayRoundTrip(ParagraphFixtures, ComposerHost.Hermes);
-    }
-
     // Read-only discovery: CODEX_LANGUAGE_FIX_DESKTOP_FIXTURE_PROBE=1. Never authorizes a write or new fixture variant.
     [Fact]
     public void PreparedSyntheticParagraphList_ReadOnlyReportsVerifiedFixtureEncoding()
@@ -494,22 +471,6 @@ public sealed class LiveDesktopCorrectionTests(ITestOutputHelper output)
     {
         if (Environment.GetEnvironmentVariable("CODEX_LANGUAGE_FIX_DESKTOP_PARAGRAPH_NATIVE_TEST") != "1") return;
         RunNativeRoundTrip(ParagraphFixtures, ComposerHost.Codex);
-    }
-
-    // Opt in with ANTIGRAVITY_DESKTOP_NATIVE_TEST=1; only the exact Antigravity sentence fixture is authorized.
-    [Fact]
-    public void PreparedSyntheticAntigravitySentence_DirectNativeRoundTrip()
-    {
-        if (Environment.GetEnvironmentVariable("ANTIGRAVITY_DESKTOP_NATIVE_TEST") != "1") return;
-        RunNativeRoundTrip(SentenceFixtures, ComposerHost.Antigravity);
-    }
-
-    // Opt in with HERMES_DESKTOP_NATIVE_TEST=1; only the exact Hermes sentence fixture is authorized.
-    [Fact]
-    public void PreparedSyntheticHermesSentence_DirectNativeRoundTrip()
-    {
-        if (Environment.GetEnvironmentVariable("HERMES_DESKTOP_NATIVE_TEST") != "1") return;
-        RunNativeRoundTrip(SentenceFixtures, ComposerHost.Hermes);
     }
 
     private void RunNativeRoundTrip(IReadOnlyList<PreparedFixture> fixtures, ComposerHost expectedHost)

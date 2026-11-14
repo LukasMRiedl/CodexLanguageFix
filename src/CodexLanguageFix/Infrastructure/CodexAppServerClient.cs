@@ -736,6 +736,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient, IStructuredCod
             Directory.CreateDirectory(_runtimeDirectory);
             startInfo.ArgumentList.Add("-c");
             startInfo.ArgumentList.Add("features.plugins=false");
+            // Completed correction threads have no subscribers or further history to retain.
+            // This is a process-local override; the user's Codex configuration is untouched.
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("thread_unload_delay_secs=0");
             startInfo.ArgumentList.Add("app-server");
             var process = Process.Start(startInfo)
                 ?? throw new CodexAppServerException(_localizer.Get(AppText.CodexAppServerStartFailed));

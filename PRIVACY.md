@@ -26,7 +26,9 @@ Automatic preparation can transmit unsent intermediate drafts whenever typing pa
 
 ## Local logs
 
-Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never logged. Diagnostic logs contain only the provider, timestamp, operation type, duration, optional HTTP status code, character count, and change count. These files are deleted after seven days.
+The native implementation does not write diagnostic log files. Its latest status remains in memory and is available in Settings. Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are not logged. Explicit test probes expose fixed technical events and numeric counters without editor content or account data.
+
+The retained C# reference can write technical diagnostic logs under the local application-data folder and deletes them after seven days. Existing files from that reference are not part of the native package.
 
 Opt-in benchmark reports likewise contain only technical timings, hashes, aggregate quality results, protocol metadata, and pass/fail states. They do not contain prompt text, corrected text, or provider responses.
 
@@ -38,12 +40,14 @@ Exit the app from its system tray menu, then delete the application folder. Sett
 
 The shortcut recorder handles key combinations only while its manually opened recording UI is active. Only the selected modifiers and virtual-key code are stored in the existing local settings file. This does not add a global keyboard hook or a keystroke log. The app does not display automatic Windows notification balloons; its latest status is kept in memory and is available in the manually opened Settings dialog.
 
-## Windows and Chrome development candidate
+## Codex Desktop field access
 
-The unreleased Windows/Chrome candidate extends eligible fields beyond the original three desktop applications. If preparation is enabled, eligible focused fields in newly supported programs and websites are also sent to Codex after 1.2 seconds of stable text. Preparation does not insert corrections automatically. Passwords and recognized credential, payment, code and command fields are excluded before browser text capture.
+The native app and its Codex-only reference version 1.5.4 read only supported text fields within Codex Desktop. They do not inspect general Windows text fields, browsers, Antigravity, or Hermes. The correction and optional preparation behavior described above applies only to Codex Desktop. Version 2.0.0 was installed locally after functional checks; at the user's explicit request, full long-duration resource acceptance remains deferred.
 
-The optional Chrome extension holds only the active editor state, its prepared result and undo/recovery data in memory. It communicates through Chrome Native Messaging and a current-user-only named pipe with the desktop app, using the same correction provider. No OAuth tokens or account credentials are passed to the extension. If a page normalizes an attempted edit and verification fails, the original is retained in memory for explicit recovery; the user can display it inline at Aa. This does not write a recovery file, copy to the clipboard or open an automatic notification.
+Codex UI Automation runs in a separate local child process. Field text and verified changes cross private redirected process streams and remain in memory. Native UI Automation objects stay inside that process. Diagnostic phase markers use a fixed set of technical names and contain no field text. Failed or interrupted writes are not automatically replayed.
 
-Native Windows field access runs in a separate local child process. Field text and verified changes cross private redirected process streams and remain in memory. Native UI Automation objects stay inside that process. Diagnostic phase markers use a fixed set of technical names and contain no field text. Failed or interrupted writes are not automatically replayed.
+## Historical Windows and Chrome development candidates
 
-Chrome's HTTP/HTTPS content-script access is required for the supported website fields. Internal Chrome pages, local files and Incognito are excluded. Remove the extension in Chrome and run the matching `scripts/uninstall-native-host.ps1` with its installed host executable path to remove only this native-host registration. These additions remain subject to the acceptance gates documented in `docs/windows-chrome-1.6.0.md`.
+Earlier unreleased candidates explored general Windows text fields and browser pages, including an optional Chrome extension. Those features are not part of version 1.5.4. The desktop app no longer starts a browser bridge. The verified local deactivation is recorded in the [verification report](docs/codex-only-2026-11-13.md).
+
+The former extension used Chrome Native Messaging and a current-user-only named pipe. Its text handling, preparation, undo/recovery behavior, supported-page limits, and test descriptions in [`browser-extension/README.md`](browser-extension/README.md) describe that historical implementation only. The earlier acceptance report at [`docs/windows-chrome-1.6.0.md`](docs/windows-chrome-1.6.0.md) likewise records the development state at that time and is not a current support statement.

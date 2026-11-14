@@ -14,6 +14,30 @@ public sealed class LunaRuntimeLifecycleTests
     private const string Instructions = "Correct the text.";
 
     [Fact]
+    public async Task CanceledCorrection_UnsubscribesItsConsumedThreadAndKeepsNextPreparation()
+    {
+        using var client = new CodexAppServerClient(Path.GetTempPath());
+        using var transport = new Transport(client, "cancel") { CompleteTurns = false };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource();
+        await client.WarmUpOnConnectionAsync(transport.Connection, Instructions, "low", timeout.Token);
+        var correction = Run(client, transport, cancellation.Token);
+        await transport.TurnStarted.Task.WaitAsync(timeout.Token);
+        var turns = (System.Collections.ICollection)typeof(CodexAppServerClient)
+            .GetField("_turns", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!;
+        while (turns.Count == 0) await Task.Delay(1, timeout.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => correction.WaitAsync(timeout.Token));
+        Assert.Equal("cancel-thread-1", await transport.Unsubscribed.Task.WaitAsync(timeout.Token));
+        Assert.Equal(1, transport.Count("turn/interrupt"));
+        Assert.Equal(1, transport.Count("turn/start"));
+        await client.WarmUpOnConnectionAsync(transport.Connection, Instructions, "low", timeout.Token);
+        await client.WarmUpOnConnectionAsync(transport.Connection, Instructions, "low", timeout.Token);
+        Assert.Equal(2, transport.Count("thread/start"));
+        Assert.Equal(1, transport.Count("thread/unsubscribe"));
+    }
+
+    [Fact]
     public async Task WarmCorrection_ReusesOnlyItsPreparedThreadWithoutAccountOrCatalogRoundTrips()
     {
         using var client = new CodexAppServerClient(Path.GetTempPath());
@@ -226,6 +250,9 @@ public sealed class LunaRuntimeLifecycleTests
                         break;
                     case "thread/unsubscribe":
                         Unsubscribed.TrySetResult(parameters.GetProperty("threadId").GetString()!);
+                        result = new { };
+                        break;
+                    case "turn/interrupt":
                         result = new { };
                         break;
                     default:

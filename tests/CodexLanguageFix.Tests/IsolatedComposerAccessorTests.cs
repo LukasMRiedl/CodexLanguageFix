@@ -35,6 +35,9 @@ public sealed class IsolatedComposerAccessorTests
             Assert.False(response.Failed);
             Assert.Null(response.Snapshot);
             Assert.Equal("not_attempted", response.CaptureStatus);
+            Assert.DoesNotContain(worker.Modules.Cast<ProcessModule>(), module =>
+                module.ModuleName.StartsWith("PresentationFramework", StringComparison.OrdinalIgnoreCase)
+                || module.ModuleName.StartsWith("wpfgfx", StringComparison.OrdinalIgnoreCase));
             worker.StandardInput.Close();
             await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(0, worker.ExitCode);

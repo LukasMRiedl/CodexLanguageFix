@@ -1,5 +1,7 @@
 bin/
 obj/
+native/build/
+__pycache__/
 .vs/
 .vscode/
 TestResults/

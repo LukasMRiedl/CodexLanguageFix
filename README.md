@@ -2,19 +2,25 @@
 
 **English** · [Deutsch](README.de.md)
 
-Development toward 1.6.0 adds general Windows text controls and an optional [Chrome extension](browser-extension/README.md). The [November 6 verification report](docs/windows-coverage-2026-11-06.md) documents the Codex selection fix, native Windows process isolation, and actual live checks. Coverage across all applications remains partial; the user cancelled the RAM comparison. The [earlier acceptance report](docs/windows-chrome-1.6.0.md) preserves the development history.
+The current development branch implements Codex-only text correction natively in C++20/Win32. It continues to use the official Codex App Server and existing Codex sign-in. Version 2.0.0 is installed locally; correction, exact Undo, the updated overlay, native automated tests, and 3,945 differential cases have been checked. At the user's explicit request, full long-duration and resource acceptance was deferred in favor of observing everyday use. A short reading does not establish the sustained 50 MB target. C# remains a test reference and is excluded from the native product package. See the [native development notes](native/README.de.md) for build and verification details (German).
 
-A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop, Antigravity, and Hermes. Corrections use only Codex through its official ChatGPT OAuth session and the existing Luna model profile. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
+The [acceptance status](docs/native-port-2026-11-14.md) separates completed checks from the remaining release blockers and measurement limits (German).
+
+A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop. The reference implementation uses Codex through its official ChatGPT OAuth session and existing Luna model profile. No Codex plugin, OpenAI API key, additional API billing, or self-hosted server is required.
 
 > This is an independent project and is not affiliated with OpenAI or Google.
 
-The current source is **version 1.5.2**. It selects the newest Luna model offered by the installed Codex runtime that supports low reasoning with Fast Mode (`priority`). The `low` production profile passed live qualification with `gpt-6-luna`, 128 corpus cases and unchanged safety gates; see the [runtime report](docs/desktop-runtime-2026-09-30.md) for evidence and limitations. The earlier RC7 memory comparison measured approximately 49% less private memory and 43% less working set, short of the **80% target**. See the [memory report](docs/ram-optimization-2026-09-13.md) for its evidence and limitations. Version 1.4.0 is available as a stable GitHub release.
+The C# reference source in this repository is **version 1.5.4**. It selects the newest Luna model offered by the installed Codex runtime that supports low reasoning with Fast Mode (`priority`). The `low` production profile passed live qualification with `gpt-6-luna`, 128 corpus cases and unchanged safety gates; see the [runtime report](docs/desktop-runtime-2026-09-30.md) for evidence and limitations. The earlier RC7 memory comparison measured approximately 49% less private memory and 43% less working set, short of the **80% target**. See the [memory report](docs/ram-optimization-2026-09-13.md) for its evidence and limitations. These reports describe the C# reference and dated runs, not native acceptance. Version 1.4.0 is the stable GitHub release.
+
+The C# reference 1.5.4 starts its isolated UI automation worker before WPF, promptly releases unused Codex sessions owned by the app, and keeps native editor references out of the geometry cache and write identity. The [verification report](docs/codex-only-2026-11-13.md) documents those changes and the limits of the 50 MB target; it does not establish native memory results or feature parity.
 
 Version 1.5.0 passed 30 live paired immediate-shortcut comparisons: median wait fell from 4.53 to 2.97 seconds (34.5%), with all 60 corrections exact and a better overall p95. That version was installed locally with optional Luna preparation enabled. See the [speed report](docs/shortcut-speed-2026-10-13.md) for method and limitations.
 
-The Codex-only migration preserves existing shortcuts and startup settings. Automatic preparation stays enabled for existing Codex users who enabled it; it is disabled for legacy LanguageTool, missing or invalid provider settings. Newly saved settings use schema version 2 so an explicit preparation choice survives later restarts.
+The C# reference's Codex-only migration preserves existing shortcuts and startup settings. Automatic preparation stays enabled for existing Codex users who enabled it; it is disabled for legacy LanguageTool, missing or invalid provider settings. Newly saved settings use schema version 2 so an explicit preparation choice survives later restarts.
 
-## Features
+## C# reference: features and operation
+
+The following feature, installation, and privacy notes describe the C# reference source. They do not establish feature parity or live behavior for the native port.
 
 - No automatic Windows notifications. Correction status and Undo remain next to Aa; the last message is available through **system tray → Settings…**.
 - Choose **Settings… → Record shortcut** to capture and save a combination. It takes effect without restarting and persists across app restarts. Combinations already registered by another application are rejected when saving. Ctrl and/or Alt plus another key, optionally Shift, and function keys with optional Shift are supported; F12 and Windows-key combinations are excluded. AltGr is technically Ctrl+Alt and may conflict with ordinary special characters depending on the chosen key. **Restore default** selects Ctrl+Alt+comma again.
@@ -34,9 +40,11 @@ The Codex-only migration preserves existing shortcuts and startup settings. Auto
 - Requests are cancelled when the source editor or text changes, or correction is disabled. Partial write failures never trigger a blind full-text retry. Verified own changes are rolled back when safe; no recovery window opens.
 - No background service and no automatic updater.
 
-The expanded Aa field recognition and placement are documented in the [field diagnosis report](docs/aa-coverage-2026-10-04.md). Main-chat correction and exact undo were verified live in Codex and Hermes, including real monitor transitions between 175% and 200%. Version 1.4.0 was installed during that validation; additional inaccessible field families are explicitly listed as unverified in the report.
+The [field diagnosis report](docs/aa-coverage-2026-10-04.md) records earlier checks. Main-chat correction and exact undo were verified live in Codex and Hermes at that time, including real monitor transitions between 175% and 200%. Version 1.4.0 was installed during that validation. These historical findings do not describe Hermes support in version 1.5.4; additional inaccessible field families are explicitly listed as unverified in the report.
 
-## Installation
+## C# reference: installation
+
+The download link points to the stable C# release (version 1.4.0); it is not the repository's 1.5.4 C# reference source described by the operation and privacy notes.
 
 1. Download `CodexLanguageFix-win-x64.zip` from the [latest release](https://github.com/LukasMRiedl/CodexLanguageFix/releases/latest).
 2. Extract the ZIP archive to a permanent folder.
@@ -49,7 +57,7 @@ Codex correction requires the official Codex Desktop installation and a ChatGPT 
 
 The published executable is currently not code-signed. Windows may therefore display a security warning the first time you launch it.
 
-## Privacy
+## C# reference: privacy
 
 With automatic preparation enabled, unsent intermediate drafts can be transmitted whenever typing pauses. Cancellation after further editing cannot undo a transmission that has already occurred.
 
@@ -59,15 +67,25 @@ Prompt text, corrected text, provider responses, OAuth tokens, email addresses, 
 
 See [PRIVACY.md](PRIVACY.md) for more information.
 
-## Provider limits
+## C# reference: provider limits
 
 Codex accepts at most 20,000 characters per correction. The app creates no queue. Automatic Luna preparation is optional and off by default; its requests may count toward the usage limits of the ChatGPT account connected to Codex.
 
-## Build and test
+## Native build and automated verification
 
-The .NET 8 SDK on Windows is required.
+Use the native build script on Windows with Visual Studio Build Tools 2022, MSVC v143, Windows SDK, and CMake:
 
-The focused live format regression is opt-in (12 Codex cases, no raw-text logging):
+```powershell
+.\scripts\build-native.ps1
+```
+
+The script builds and tests the C++20/Win32 targets and writes a package to `dist/native-win-x64`. Building alone neither installs nor publishes the app and does not establish resource acceptance. The [native development notes](native/README.de.md) list the differential and worker-protocol commands and their limits. Local live checks and outstanding long-duration evidence are recorded in the [acceptance status](docs/native-port-2026-11-14.md) (German).
+
+The C# project is retained as a test reference. Its .NET tests and qualification tools do not build or publish the native product. Historical C# measurements remain in the dated reports linked above.
+
+### C# reference tests and historical qualification
+
+The .NET 8 SDK on Windows is required for these C# reference checks. The focused live format regression is opt-in (12 Codex cases, no raw-text logging):
 
 ```powershell
 $env:CODEX_LANGUAGE_FIX_FORMAT_LIVE_TEST = '1'
@@ -76,40 +94,23 @@ dotnet test .\CodexLanguageFix.sln -c Release --filter FullyQualifiedName~LiveFo
 
 ```powershell
 dotnet test .\CodexLanguageFix.sln
-dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true
 ```
 
-The external quality and latency benchmark is intentionally opt-in and requires the official Codex Desktop installation and its ChatGPT OAuth session; Codex Desktop can remain closed. The production qualification script measures only `baseline / low / full-v1` on the newest Luna model offered by the installed runtime that supports low reasoning and Fast Mode (`priority`). It records the selected model in its schema-v3 report and includes no fallback to unsupported reasoning levels or protocols. Current benchmark tools use Codex only; LanguageTool comparisons below describe historical runs. The [30 September 2026 run](docs/desktop-runtime-2026-09-30.md) passed every safety gate with `gpt-6-luna`; Luna was more accurate, but slower, than LanguageTool on the paired sample. Exploratory matrix settings are checked against the same runtime selection and unsupported efforts fail closed. Reports contain no raw text.
+The external quality and latency benchmark is intentionally opt-in and requires the official Codex Desktop installation and its ChatGPT OAuth session; Codex Desktop can remain closed. The production qualification script measures `baseline / low / full-v1` on the newest Luna model offered by the installed runtime that supports low reasoning and Fast Mode (`priority`). The [30 September 2026 run](docs/desktop-runtime-2026-09-30.md) passed every safety gate with `gpt-6-luna`; Luna was more accurate, but slower, than LanguageTool on the paired sample. Reports contain no raw text.
 
 ```powershell
 .\scripts\run-full-luna-qualification.ps1
 ```
 
-The historical qualification run of 20 August 2026 measured the then-fixed `gpt-5.6-luna` profile `baseline / none / full-v1`. It passed every safety gate and achieved an F0.5 score of 0.75 versus LanguageTool's 0.25 on the final paired sample. Luna was not faster: its warm p50 was 7.97 seconds versus 0.72 seconds for LanguageTool, about 11.1 times slower. Segment and span-edit protocols therefore were not activated. These measurements describe that dated run, not a hard-coded model choice in the current app.
+The earlier qualification run on 20 August 2026 measured the then-fixed `gpt-5.6-luna` profile `baseline / none / full-v1`. It passed every safety gate and achieved an F0.5 score of 0.75 versus LanguageTool's 0.25 on the final paired sample. Luna was not faster: its warm p50 was 7.97 seconds versus 0.72 seconds for LanguageTool, about 11.1 times slower. These are dated C# reference measurements, not native results.
 
-The resulting self-contained executable is written to:
+The C# reference's standalone executable was written to `src\CodexLanguageFix\bin\Release\net8.0-windows\win-x64\publish\CodexLanguageFix.exe`. Its process-lifetime diagnosis and optional independent-start checks are documented in the [process-lifetime report](docs/process-lifetime-2026-10-10.md). This is not the native build procedure.
 
-`src\CodexLanguageFix\bin\Release\net8.0-windows\win-x64\publish\CodexLanguageFix.exe`
-
-After installing from an agent or IDE terminal, start the stopped desktop app through Explorer so it does not inherit the terminal's process lifetime:
-
-```powershell
-.\scripts\start-independent.ps1 -ExecutablePath "C:\path\to\CodexLanguageFix.exe"
-```
-
-The script verifies Explorer as the parent process. The opt-in `scripts/test-independent-start.ps1` accepts the same path and checks that the app survives closing a disposable Windows job while a normally launched control process terminates. It leaves the app running. See the [process-lifetime diagnosis](docs/process-lifetime-2026-10-10.md).
-
-## Supported applications
+## C# reference: supported applications
 
 - OpenAI Codex Desktop for Windows
-- Antigravity for Windows
-- Hermes for Windows
 
-Application detection relies on accessible UI structures rather than hard-coded screen coordinates.
+The C# reference and native app process only supported text fields within Codex Desktop. Other Windows applications, Antigravity, Hermes, and browsers are not supported.
 
 ## Legal status
 

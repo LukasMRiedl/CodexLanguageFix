@@ -11,26 +11,16 @@ public partial class App : System.Windows.Application
 {
     private DiagnosticLogger? _logger;
     private string _exitReason = "runtime_exit";
-    private bool _exiting;
     private Mutex? _singleInstanceMutex;
     private CodexAppServerClient? _codexAppServerClient;
     private TrayController? _tray;
     private CorrectionCoordinator? _coordinator;
     private MemoryDiagnostics? _memoryDiagnostics;
-    private BrowserBridgeServer? _browserBridge;
     private PrioritizedCorrectionProvider? _sharedProvider;
     private IsolatedComposerAccessor? _composerAccessor;
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        if (e.Args.FirstOrDefault() == "--composer-worker")
-        {
-            base.OnStartup(e);
-            if (e.Args is [_, var parentId] && int.TryParse(parentId, out var parentProcessId) && parentProcessId > 0)
-                Shutdown(ComposerProcessServer.RunNative(parentProcessId));
-            else Shutdown(2);
-            return;
-        }
         var settingsService = new SettingsService();
         var logger = new DiagnosticLogger(settingsService.ApplicationDirectory);
         _logger = logger;
@@ -81,25 +71,6 @@ public partial class App : System.Windows.Application
         var lunaProvider = new LunaCorrectionProvider(_codexAppServerClient, localizer);
         _sharedProvider = new PrioritizedCorrectionProvider(lunaProvider);
         _tray = new TrayController(settings, settingsService, autostartService, localizer);
-        _browserBridge = new BrowserBridgeServer(_sharedProvider,
-            async () => await Dispatcher.InvokeAsync(() => new BrowserState(
-                _tray.Enabled, _tray.PrepareLunaCorrections,
-                _tray.Shortcut.Modifiers, _tray.Shortcut.VirtualKey)),
-            message =>
-            {
-                if (!_exiting && !Dispatcher.HasShutdownStarted)
-                    _ = Dispatcher.BeginInvoke(() => { if (!_exiting) _tray.SetStatus(message, message); });
-            },
-            BrowserForeground.IsChrome,
-            key => localizer.Get(key switch
-            {
-                "ready" => AppText.BrowserCorrectionReady,
-                "unavailable" => AppText.BrowserCorrectionDisabled,
-                _ => AppText.BrowserCorrectionFailed
-            }));
-        _tray.EnabledChanged += BrowserSettingsChanged;
-        _tray.PreparationChanged += BrowserSettingsChanged;
-        _tray.ShortcutChanged += BrowserSettingsChanged;
         var overlay = new OverlayWindow(localizer);
         var composerAccessor = new IsolatedComposerAccessor();
         _composerAccessor = composerAccessor;
@@ -118,15 +89,12 @@ public partial class App : System.Windows.Application
             _exitReason = "tray_exit";
             Shutdown();
         };
-        _coordinator.ForegroundChanged += _browserBridge.ForegroundChanged;
         _coordinator.Start();
         logger.Write("application_started");
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _exiting = true;
-        _browserBridge?.Dispose();
         _coordinator?.Dispose();
         _composerAccessor?.Dispose();
         _sharedProvider?.Dispose();
@@ -149,11 +117,6 @@ public partial class App : System.Windows.Application
         _logger?.Write("application_exit", statusCode: e.ApplicationExitCode, reason: _exitReason);
         DispatcherUnhandledException -= OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
-    }
-
-    private void BrowserSettingsChanged(object? sender, EventArgs e)
-    {
-        if (_browserBridge is not null) _ = _browserBridge.SettingsChangedAsync();
     }
 
     private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

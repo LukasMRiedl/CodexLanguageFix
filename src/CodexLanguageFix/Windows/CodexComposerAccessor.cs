@@ -16,7 +16,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     public CodexComposerAccessor(Action<string>? nativePhase = null) => _nativePhase = nativePhase;
 
-    private ComposerSnapshot? _lastAppliedEditor;
+    private ComposerEditorIdentity? _lastAppliedEditor;
     private ComposerEditPlan? _lastAppliedPlan;
     public string LastWriteStatus { get; private set; } = "not_attempted";
     public ComposerWriteResult? LastWriteResult { get; private set; }
@@ -381,7 +381,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
             LastWriteStatus = LastWriteResult.Status;
             if (LastWriteResult.State == ComposerWriteState.Applied)
             {
-                _lastAppliedEditor = current;
+                _lastAppliedEditor = ComposerEditorIdentity.From(current);
                 _lastAppliedPlan = plan;
             }
             return LastWriteResult.State == ComposerWriteState.Applied;
@@ -488,18 +488,7 @@ public sealed class CodexComposerAccessor : IComposerAccessor
 
     private static ComposerHost? TryGetComposerHost(AutomationElement element) => TryGetComposerHost(element.Current.ProcessId);
 
-    private static ComposerHost? TryGetComposerHost(int processId)
-    {
-        var known = ComposerHostProcess.Identify(processId);
-        if (known is not null) return known;
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            if (processId == Environment.ProcessId || process.ProcessName.Equals("chrome", StringComparison.OrdinalIgnoreCase)) return null;
-            return ComposerHost.Windows;
-        }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception) { return null; }
-    }
+    internal static ComposerHost? TryGetComposerHost(int processId) => ComposerHostProcess.Identify(processId);
 
     private ComposerSnapshot? CreateSnapshot(
         AutomationElement element,
