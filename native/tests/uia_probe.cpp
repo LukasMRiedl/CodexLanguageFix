@@ -9,11 +9,21 @@
 
 namespace {
 using json = nlohmann::json;
+constexpr std::wstring_view multi_original =
+    L"Gut wir haben wider eine liste. - ein zeigr zeigt auf index 0 - jetzt auf index 2 verschoben - der wert an index 2 wird mit 42 überschriben\n\n"
+    L"ergebniss: werte enthält {5, 15, 42}";
+constexpr std::wstring_view multi_corrected =
+    L"Gut, wir haben wieder eine Liste. – Ein Zeiger zeigt auf Index 0 – jetzt auf Index 2 verschoben – der Wert an Index 2 wird mit 42 überschrieben.\n\n"
+    L"Ergebnis: werte enthält {5, 15, 42}.";
 struct KnownSynthetic {
   const char *variant;
   const char *framing;
 };
 std::optional<KnownSynthetic> known_synthetic(std::wstring_view text) {
+  if (text == multi_original)
+    return KnownSynthetic{"original", "paragraphs"};
+  if (text == multi_corrected)
+    return KnownSynthetic{"corrected", "paragraphs"};
   struct Frame {
     std::wstring_view suffix;
     const char *name;
@@ -128,7 +138,10 @@ int wmain(int argc, wchar_t **argv) {
       if (owner && std::to_wstring(owner) == argv[2] && known &&
           std::string_view(known->variant) == "original") {
         auto corrected = snapshot->text;
-        corrected.insert(corrected.find(L"korekt") + 3, L"r");
+        if (corrected == multi_original)
+          corrected = multi_corrected;
+        else
+          corrected.insert(corrected.find(L"korekt") + 3, L"r");
         const auto applied = client.replace(*snapshot, snapshot->text, corrected);
         output["correction"] = applied.status;
         if (applied.state == clf::WriteState::applied) {

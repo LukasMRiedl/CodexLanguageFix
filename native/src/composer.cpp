@@ -1173,23 +1173,28 @@ class Accessor {
     auto r = range(e, selectionStart, anchorText);
     if (!r)
       return false;
-    auto caret = clone(r.Get());
-    check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_End, caret.Get(),
-                                     TextPatternRangeEndpoint_Start));
+    // Arrow-key selection can stop at a visual wrap in LearnHarness.
+    // Validate the exact selected text and its position below before writing.
+    const bool select_range = s.host == "LearnHarness" && !old.empty();
+    if (!select_range)
+      check(r->MoveEndpointByRange(TextPatternRangeEndpoint_End, r.Get(),
+                                    TextPatternRangeEndpoint_Start));
     if (!current(e, s) || read(e) != before)
       return false;
-    check(caret->Select());
-    if (wait_for_selection_exact([&] {
-          return selection(e, s, before, selectionStart, L"");
-        }) != SelectionCheck::exact)
-      return false;
-    if (!current(e, s) || read(e) != before)
-      return false;
-    if (old.empty()) {
-      if (selectionStart < start && !selectkeys(anchorText, false))
+    check(r->Select());
+    if (!select_range) {
+      if (wait_for_selection_exact([&] {
+            return selection(e, s, before, selectionStart, L"");
+          }) != SelectionCheck::exact)
         return false;
-    } else if (!selectkeys(old))
-      return false;
+      if (!current(e, s) || read(e) != before)
+        return false;
+      if (old.empty()) {
+        if (selectionStart < start && !selectkeys(anchorText, false))
+          return false;
+      } else if (!selectkeys(old))
+        return false;
+    }
     if (wait_for_selection_exact([&] {
           return selection(e, s, before, start, old);
         }) != SelectionCheck::exact)

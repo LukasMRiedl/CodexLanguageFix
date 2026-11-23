@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(CodexLanguageFixNative VERSION 2.1.1 LANGUAGES CXX RC)
+project(CodexLanguageFixNative VERSION 2.1.2 LANGUAGES CXX RC)
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "Windows and MSVC v143 are required")
 endif()
