@@ -1999,8 +1999,24 @@ public:
     }
     out = apply_edit_plan(*plan, target);
     if (out.state == WriteState::applied) {
-      lastPlan = *plan;
-      lastEditor = identity_only(s);
+      if (expected != replacement) {
+        lastPlan = *plan;
+        lastEditor = identity_only(s);
+      }
+      try {
+        auto p = pattern(e.Get());
+        ComPtr<IUIAutomationTextRange> caret;
+        if (p)
+          check(p->get_DocumentRange(&caret));
+        if (caret) {
+          check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_Start,
+                                           caret.Get(), TextPatternRangeEndpoint_End));
+          if (target.is_current_editor() && target.read() == replacement)
+            check(caret->Select());
+        }
+      } catch (...) {
+        // A caret operation must not invalidate a verified write or its undo.
+      }
     }
     invalidate();
     return out;

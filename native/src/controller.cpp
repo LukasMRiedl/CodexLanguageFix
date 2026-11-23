@@ -329,6 +329,15 @@ struct Controller::Impl {
   void finish_request() {
     busy = false;
     request_snapshot.reset();
+    {
+      std::lock_guard lock(view_mutex);
+      state.busy = false;
+      if (!undo_state)
+        state.can_undo = false;
+      if (state.snapshot && Clock::now() < transient_until)
+        state.message = transient;
+    }
+    publish();
     refresh();
   }
   void correct(bool shortcut) {
@@ -396,32 +405,26 @@ struct Controller::Impl {
                 auto active = composer.capture(false, false);
                 if (!active || !unchanged(snapshot, *active))
                   throw AppError("PromptChanged");
-                if (outcome.text == snapshot.text) {
-                  message(translate("NoChangesFoundProvider", {L"Codex"}),
-                          &snapshot);
-                  finish_request();
-                  return;
-                }
-                auto current = composer.refresh(snapshot);
-                if (!current)
-                  throw AppError("ComposerUnavailable");
-                if (!unchanged(snapshot, *current))
-                  throw AppError("PromptChanged");
                 if (cancel.stop_requested() ||
                     generation != focus_generation.load())
                   throw AppError("CheckCancelled");
                 auto result =
-                    composer.replace(*current, snapshot.text, outcome.text);
+                    composer.replace(*active, snapshot.text, outcome.text);
                 if (result.state != WriteState::applied) {
                   undo_state.reset();
                   throw AppError("WriteRejected");
                 }
-                auto corrected = *current;
-                corrected.text = outcome.text;
-                suppress(corrected);
-                undo_state = Undo{*current, snapshot.text, outcome.text,
-                                  outcome.change_count};
-                message(count_message(outcome.change_count), &snapshot);
+                if (outcome.text == snapshot.text) {
+                  message(translate("NoChangesFoundProvider", {L"Codex"}),
+                          &snapshot);
+                } else {
+                  auto corrected = *active;
+                  corrected.text = outcome.text;
+                  suppress(corrected);
+                  undo_state = Undo{*active, snapshot.text, outcome.text,
+                                    outcome.change_count};
+                  message(count_message(outcome.change_count), &snapshot);
+                }
               } catch (const AppError &e) {
                 message(translate(e.key, e.args), &snapshot);
               } catch (...) {
@@ -482,8 +485,7 @@ struct Controller::Impl {
       } catch (...) {
         message(translate("UndoFailed"));
       }
-      busy = false;
-      refresh();
+      finish_request();
     });
   }
   void connection(bool login) {

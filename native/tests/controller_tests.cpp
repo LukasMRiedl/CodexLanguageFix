@@ -29,7 +29,7 @@ public:
   std::condition_variable capture_released;
   std::optional<Snapshot> current;
   std::atomic<int> writes{}, captures{}, polls{};
-  bool partial{}, throw_capture{}, hold_capture{};
+  bool partial{}, throw_capture{}, hold_capture{}, hold_capture_after_write{};
   Composer() {
     Snapshot s;
     s.token = 1;
@@ -75,6 +75,7 @@ public:
       return result;
     }
     current->text = replacement;
+    hold_capture = hold_capture_after_write;
     result.state = WriteState::applied;
     result.observed = replacement;
     return result;
@@ -90,6 +91,17 @@ public:
     std::lock_guard lock(gate);
     return current ? current->text : L"";
   }
+  void release_capture() {
+    {
+      std::lock_guard lock(gate);
+      hold_capture = false;
+    }
+    capture_released.notify_all();
+  }
+};
+struct CaptureRelease {
+  Composer &composer;
+  ~CaptureRelease() { composer.release_capture(); }
 };
 class Backend final : public IBackend {
 public:
@@ -153,6 +165,23 @@ void test_exact_undo() {
   until([&] { return c.writes == 2 && !controller.view().busy; });
   require(c.text() == L"Der Satz ist korekt.", "undo_exact");
 }
+void test_editing_ends_before_layout_refresh() {
+  Composer c;
+  c.hold_capture_after_write = true;
+  Backend b;
+  Controller controller(c, b, Settings{}, [] {});
+  CaptureRelease release{c};
+  visible(controller);
+  const auto previous = c.polls.load();
+  controller.correct();
+  until([&] { return b.calls == 1; });
+  require(controller.view().busy, "correction_started");
+  b.release();
+  until([&] { return c.writes == 1 && c.polls > previous; });
+  require(!controller.view().busy, "correction_finishes_before_layout");
+  c.release_capture();
+  until([&] { return controller.view().can_undo; });
+}
 void test_changed_text() {
   Composer c;
   Backend b;
@@ -184,16 +213,7 @@ void test_focus_hides_while_capture_is_blocked() {
   Backend b;
   Controller controller(c, b, Settings{}, [] {});
   visible(controller);
-  struct Release {
-    Composer &composer;
-    ~Release() {
-      {
-        std::lock_guard lock(composer.gate);
-        composer.hold_capture = false;
-      }
-      composer.capture_released.notify_all();
-    }
-  } release{c};
+  CaptureRelease release{c};
   const auto previous = c.captures.load();
   {
     std::lock_guard lock(c.gate);
@@ -373,6 +393,7 @@ int main() {
   try {
     set_language("de");
     test_exact_undo();
+    test_editing_ends_before_layout_refresh();
     test_changed_text();
     test_focus_changed();
     test_focus_hides_while_capture_is_blocked();
@@ -384,7 +405,7 @@ int main() {
     test_disabled_and_settings_cancel();
     test_identity_rejected_without_poll();
     test_shutdown_cancels_all_work();
-    std::cout << "16 controller scenarios passed\n";
+    std::cout << "17 controller scenarios passed\n";
     return 0;
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

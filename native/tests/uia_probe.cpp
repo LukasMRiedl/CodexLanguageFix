@@ -145,6 +145,8 @@ int wmain(int argc, wchar_t **argv) {
         const auto applied = client.replace(*snapshot, snapshot->text, corrected);
         output["correction"] = applied.status;
         if (applied.state == clf::WriteState::applied) {
+          // Allow the fixture to observe the browser caret before Undo changes it.
+          Sleep(80);
           const auto undone = client.replace(*snapshot, corrected, snapshot->text);
           output["undo"] = undone.status;
           roundtrip_passed = undone.state == clf::WriteState::applied;
