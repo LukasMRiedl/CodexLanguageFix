@@ -15,6 +15,18 @@ constexpr std::wstring_view multi_original =
 constexpr std::wstring_view multi_corrected =
     L"Gut, wir haben wieder eine Liste. – Ein Zeiger zeigt auf Index 0 – jetzt auf Index 2 verschoben – der Wert an Index 2 wird mit 42 überschrieben.\n\n"
     L"Ergebnis: werte enthält {5, 15, 42}.";
+constexpr std::wstring_view long_original =
+    L"Notiz A: \n"
+    L"Die erste zeile beschreibt einen längeren Text, in dem ich weiter vorne und weiter hinten einen Tippfehler gemacht hab.\n"
+    L"danach folgt ein weiterer Absatz mit einem langen unveränderten Mittelteil und dem Ende des ersten absatzes.\n"
+    L"Notiz B: \n"
+    L"hier test ich, ob auch die letzte Zeile mit technischen Werten {5, 15, 42} am ende vollständig bleibt.";
+constexpr std::wstring_view long_corrected =
+    L"Notiz A: \n"
+    L"Die erste Zeile beschreibt einen längeren Text, in dem ich weiter vorne und weiter hinten einen Tippfehler gemacht habe.\n"
+    L"Danach folgt ein weiterer Absatz mit einem langen unveränderten Mittelteil und dem Ende des ersten Absatzes.\n"
+    L"Notiz B: \n"
+    L"Hier teste ich, ob auch die letzte Zeile mit technischen Werten {5, 15, 42} am Ende vollständig bleibt.";
 struct KnownSynthetic {
   const char *variant;
   const char *framing;
@@ -24,6 +36,10 @@ std::optional<KnownSynthetic> known_synthetic(std::wstring_view text) {
     return KnownSynthetic{"original", "paragraphs"};
   if (text == multi_corrected)
     return KnownSynthetic{"corrected", "paragraphs"};
+  if (text == long_original)
+    return KnownSynthetic{"original", "long_paragraphs"};
+  if (text == long_corrected)
+    return KnownSynthetic{"corrected", "long_paragraphs"};
   struct Frame {
     std::wstring_view suffix;
     const char *name;
@@ -140,6 +156,8 @@ int wmain(int argc, wchar_t **argv) {
         auto corrected = snapshot->text;
         if (corrected == multi_original)
           corrected = multi_corrected;
+        else if (corrected == long_original)
+          corrected = long_corrected;
         else
           corrected.insert(corrected.find(L"korekt") + 3, L"r");
         const auto applied = client.replace(*snapshot, snapshot->text, corrected);

@@ -27,6 +27,12 @@ void check(HRESULT h) {
   if (FAILED(h))
     throw std::runtime_error("uia_failed");
 }
+constexpr size_t max_draft_length = 20000;
+void signal_worker(const char *message) {
+  DWORD written{};
+  WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, DWORD(strlen(message)),
+            &written, nullptr);
+}
 struct Handle {
   HANDLE h{};
   Handle() = default;
@@ -50,9 +56,11 @@ std::wstring take(BSTR b) {
 }
 std::wstring text(IUIAutomationTextRange *r) {
   BSTR b{};
-  check(r->GetText(20001, &b));
+  // LearnHarness may temporarily contain both the old and the new passage.
+  constexpr auto staging_limit = 2 * max_draft_length;
+  check(r->GetText(int(staging_limit + 1), &b));
   auto s = take(b);
-  if (s.size() > 20000)
+  if (s.size() > staging_limit)
     throw std::runtime_error("text_limit");
   return s;
 }
@@ -1046,24 +1054,19 @@ class Accessor {
                                       TextPatternRangeEndpoint_End));
     check(chosen->MoveEndpointByRange(TextPatternRangeEndpoint_Start, sel.Get(),
                                       TextPatternRangeEndpoint_Start));
-    auto phase = [](const char *p) {
-      DWORD n{};
-      WriteFile(GetStdHandle(STD_ERROR_HANDLE), p, DWORD(strlen(p)), &n,
-                nullptr);
-    };
-    phase("uia-phase:selection_document\n");
+    signal_worker("uia-phase:selection_document\n");
     if (text(doc.Get()) != before)
       return SelectionCheck::text_mismatch;
-    phase("uia-phase:selection_prefix\n");
+    signal_worker("uia-phase:selection_prefix\n");
     if (text(pre.Get()) != before.substr(0, start))
       return SelectionCheck::text_mismatch;
-    phase("uia-phase:selection_through\n");
+    signal_worker("uia-phase:selection_through\n");
     if (text(through.Get()) != before.substr(0, start + expected.size()))
       return SelectionCheck::text_mismatch;
-    phase("uia-phase:selection_selected\n");
+    signal_worker("uia-phase:selection_selected\n");
     if (text(chosen.Get()) != expected)
       return SelectionCheck::text_mismatch;
-    phase("uia-phase:selection_suffix\n");
+    signal_worker("uia-phase:selection_suffix\n");
     if (text(suf.Get()) != before.substr(start + expected.size()))
       return SelectionCheck::text_mismatch;
     if (!current(e, s))
@@ -1146,6 +1149,80 @@ class Accessor {
     }
     return false;
   }
+  bool select_exact(IUIAutomationElement *e, const Snapshot &s,
+                    IUIAutomationTextRange *target, const std::wstring &before,
+                    int start, const std::wstring &expected) {
+    if (!current(e, s) || read(e) != before)
+      return false;
+    check(target->Select());
+    return wait_for_selection_exact([&] {
+             return selection(e, s, before, start, expected);
+           }) == SelectionCheck::exact;
+  }
+  bool stage_replacement(IUIAutomationElement *e, const Snapshot &s, int start,
+                         const std::wstring &old, const std::wstring &replacement,
+                         const std::wstring &before) {
+    auto caret = range(e, start, old);
+    if (!caret)
+      return false;
+    check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_Start, caret.Get(),
+                                    TextPatternRangeEndpoint_End));
+    const auto end = start + int(old.size());
+    if (!select_exact(e, s, caret.Get(), before, end, L""))
+      return false;
+
+    auto discard_staged = [&] {
+      if (!current(e, s))
+        return false;
+      const auto actual = read(e);
+      if (actual.size() <= before.size())
+        return false;
+      const auto count = actual.size() - before.size();
+      const auto inserted = actual.substr(end, count);
+      if (!std::wstring_view(replacement).starts_with(inserted) ||
+          actual.compare(0, end, before, 0, end) != 0 ||
+          actual.compare(end + count, std::wstring::npos, before, end,
+                         std::wstring::npos) != 0)
+        return false;
+      auto inserted_range = range(e, end, inserted);
+      if (inserted_range && select_exact(e, s, inserted_range.Get(), actual, end,
+                                         inserted) && input(L""))
+        wait_for_exact(before, [&]() -> std::optional<std::wstring> { return read(e); },
+                       [&] { return current(e, s); });
+      return false;
+    };
+
+    // Keep the original passage until all of the replacement is visible.
+    auto staged = before;
+    auto boundaries = grapheme_boundaries(replacement);
+    boundaries.push_back(int(replacement.size()));
+    constexpr int batch_length = 24;
+    for (size_t first = 0; first + 1 < boundaries.size();) {
+      auto last = first + 1;
+      while (last + 1 < boundaries.size() &&
+             boundaries[last + 1] - boundaries[first] <= batch_length)
+        ++last;
+      const int offset = boundaries[first];
+      const auto part = replacement.substr(offset, boundaries[last] - offset);
+      if (selection(e, s, staged, end + offset, L"") != SelectionCheck::exact ||
+          !input(part))
+        return discard_staged();
+      staged.insert(end + offset, part);
+      if (wait_for_exact(staged, [&]() -> std::optional<std::wstring> { return read(e); },
+                         [&] { return current(e, s); }) != WriteCheck::exact)
+        return discard_staged();
+      signal_worker("uia-phase:write_progress\n");
+      first = last;
+    }
+
+    auto original = range(e, start, old);
+    if (!original || !select_exact(e, s, original.Get(), staged, start, old) ||
+        !input(L""))
+      return discard_staged();
+    staged.erase(start, old.size());
+    return wait_for_exact(staged, [&]() -> std::optional<std::wstring> { return read(e); },
+                          [&] { return current(e, s); }) == WriteCheck::exact;
+  }
   bool patch(IUIAutomationElement *e, const Snapshot &s, int start,
              const std::wstring &old, const std::wstring &replacement) {
     if (!current(e, s) || !simple(old) || !simple(replacement))
@@ -1154,6 +1231,8 @@ class Accessor {
     if (start < 0 || size_t(start) > before.size() ||
         before.substr(start, old.size()) != old)
       return false;
+    if (s.host == "LearnHarness" && !old.empty() && !replacement.empty())
+      return stage_replacement(e, s, start, old, replacement, before);
     int selectionStart = start;
     std::wstring anchorText = old;
     if (old.empty() && !before.empty()) {
@@ -1772,6 +1851,8 @@ public:
         s.host = "LearnHarness";
       s.runtime_id = rid(e.Get());
       s.text = read(e.Get());
+      if (s.text.size() > max_draft_length)
+        throw std::runtime_error("text_limit");
       s.keyboard_focused = focused(e.Get());
       if (require && !s.keyboard_focused) {
         captureReason = CaptureReason::keyboard_focus_mismatch;
@@ -1872,6 +1953,8 @@ public:
         return {};
       }
       saved.text = read(e.Get());
+      if (saved.text.size() > max_draft_length)
+        throw std::runtime_error("text_limit");
       saved.keyboard_focused = focused(e.Get());
       saved.editor_bounds = bounds(e.Get());
       if (saved.editor_bounds->empty) {
@@ -2208,6 +2291,7 @@ struct ComposerClient::Impl {
     if (!process.h && (!allow || !start()))
       return {};
     request["version"] = 2;
+    const auto operation = request.value("operation", std::string{});
     phase.clear();
     try {
       auto future = std::async(std::launch::async, [&] {
@@ -2232,6 +2316,8 @@ struct ComposerClient::Impl {
               if (!overlong) {
                 if (!line.empty() && line.back() == '\r')
                   line.pop_back();
+                if (operation == "replace" && line == "uia-phase:write_progress")
+                  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
                 for (auto allowed : {"uia-phase:selection_document",
                                      "uia-phase:selection_prefix",
                                      "uia-phase:selection_through",
@@ -2259,7 +2345,6 @@ struct ComposerClient::Impl {
         throw std::runtime_error("worker_timeout");
       if (!response || response->at("version") != 2)
         throw std::runtime_error("protocol");
-      const auto operation = request.value("operation", std::string{});
       if (operation == "capture" || operation == "poll" ||
           operation == "refresh")
         status = response->value("capture_status", "uia_operation_failed");
