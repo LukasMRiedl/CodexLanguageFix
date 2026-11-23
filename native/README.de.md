@@ -6,6 +6,14 @@ UI Automation isoliert auf einem MTA-Thread aus. Der offizielle Codex App Server
 bleibt ein eigener Kindprozess und verwendet die vorhandene Codex-Anmeldung.
 Browser und allgemeine Windows-Textfelder sind deaktiviert.
 
+Unterstützt werden außerdem Startprompts, der Chat, Freitextfelder für
+Lernaufgaben und Side Questions in der Desktop-Version von LearnHarness 0.7.0.
+Die Korrektur funktioniert über die Aa-Schaltfläche oder das eingestellte
+Tastenkürzel. Sie verwendet wie in Codex die bestehende Codex-Anmeldung.
+In LearnHarness werden Korrekturen ausschließlich manuell ausgelöst. Enthält
+das Eingabefeld einen eingebetteten Datei- oder Ordneranhang oder ein Zitat,
+korrigiere den Text vor dem Einfügen dieses Elements.
+
 Die C#-Quellen unter `src/` und deren Tests bleiben als Vergleichsreferenz erhalten.
 Sie gehören nicht zum nativen Produktpaket. Auch die Programme unter `tests/`
 werden nicht installiert.

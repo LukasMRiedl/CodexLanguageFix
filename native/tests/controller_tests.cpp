@@ -282,6 +282,23 @@ void test_preparation_adopted_once() {
   std::this_thread::sleep_for(30ms);
   require(b.prepares == 1, "applied_result_suppresses_preparation");
 }
+void test_learn_harness_requires_manual_correction() {
+  Composer c;
+  c.current->host = "LearnHarness";
+  Backend b;
+  Settings settings;
+  settings.prepare = true;
+  Controller controller(c, b, settings, [] {});
+  visible(controller);
+  std::this_thread::sleep_for(1250ms);
+  controller.tick();
+  controller.correct();
+  until([&] { return b.calls == 1; });
+  require(b.prepares == 0, "learn_harness_never_prepares");
+  b.release();
+  until([&] { return controller.view().can_undo; });
+  require(c.writes == 1, "learn_harness_manual_correction_applied");
+}
 void test_disabled_and_settings_cancel() {
   for (bool settings_open : {false, true}) {
     Composer c;
@@ -363,10 +380,11 @@ int main() {
     test_stale_undo();
     test_worker_failure_recovers();
     test_preparation_adopted_once();
+    test_learn_harness_requires_manual_correction();
     test_disabled_and_settings_cancel();
     test_identity_rejected_without_poll();
     test_shutdown_cancels_all_work();
-    std::cout << "15 controller scenarios passed\n";
+    std::cout << "16 controller scenarios passed\n";
     return 0;
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

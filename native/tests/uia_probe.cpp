@@ -68,6 +68,7 @@ json capture_summary(const std::optional<clf::Snapshot> &snapshot,
   result["editor_bounds"] =
       value.editor_bounds ? rectangle(*value.editor_bounds) : json(nullptr);
   result["keyboard_focused"] = value.keyboard_focused;
+  result["host"] = value.host;
   result["category"] = value.field_category == "chat"    ? "chat"
                        : value.field_category == "prose" ? "prose"
                                                          : "unknown";
@@ -98,8 +99,18 @@ int wmain(int argc, wchar_t **argv) {
   }
   const bool include_layout =
       argc == 2 && std::wstring_view(argv[1]) == L"--layout";
-  if (argc != 1 && !include_layout)
+  const bool roundtrip =
+      argc == 3 && std::wstring_view(argv[1]) == L"--roundtrip";
+  if (argc != 1 && !include_layout && !roundtrip)
     return 2;
+  if (roundtrip) {
+    DWORD foreground_pid{};
+    GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid);
+    if (!foreground_pid || std::to_wstring(foreground_pid) != argv[2]) {
+      std::cout << "{\"status\":\"fixture_not_foreground\"}\n";
+      return 5;
+    }
+  }
   try {
     clf::ComposerClient client;
     auto snapshot = client.capture(false, true);
@@ -109,6 +120,24 @@ int wmain(int argc, wchar_t **argv) {
       return 3;
     }
     json output = {{"capture", capture_summary(snapshot, client.status())}};
+    bool roundtrip_passed = false;
+    if (roundtrip && snapshot) {
+      DWORD owner{};
+      GetWindowThreadProcessId(reinterpret_cast<HWND>(snapshot->host_window), &owner);
+      const auto known = known_synthetic(snapshot->text);
+      if (owner && std::to_wstring(owner) == argv[2] && known &&
+          std::string_view(known->variant) == "original") {
+        auto corrected = snapshot->text;
+        corrected.insert(corrected.find(L"korekt") + 3, L"r");
+        const auto applied = client.replace(*snapshot, snapshot->text, corrected);
+        output["correction"] = applied.status;
+        if (applied.state == clf::WriteState::applied) {
+          const auto undone = client.replace(*snapshot, corrected, snapshot->text);
+          output["undo"] = undone.status;
+          roundtrip_passed = undone.state == clf::WriteState::applied;
+        }
+      }
+    }
     if (include_layout && snapshot) {
       auto layout = client.capture(true, true);
       if (foreign_text(layout)) {
@@ -133,7 +162,7 @@ int wmain(int argc, wchar_t **argv) {
         {"idle_owned_editor_com_refs", counts.idle_owned_editor_com_refs}};
     client.close();
     std::cout << output.dump() << '\n';
-    return 0;
+    return roundtrip && !roundtrip_passed ? 4 : 0;
   } catch (...) {
     std::cout << "{\"status\":\"probe_failed\"}\n";
     return 1;

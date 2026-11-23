@@ -177,7 +177,7 @@ struct Controller::Impl {
     attempted = handled = true;
   }
   void observe(const Snapshot &snapshot) {
-    if (!snapshot.keyboard_focused || !settings.prepare ||
+    if (snapshot.host != "Codex" || !snapshot.keyboard_focused || !settings.prepare ||
         snapshot.text.size() > 20000 || whitespace(snapshot.text)) {
       clear_preparation();
       return;

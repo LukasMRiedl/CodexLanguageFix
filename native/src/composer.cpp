@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <Objbase.h>
+#include <ShlObj.h>
 
 #include <UIAutomation.h>
 #include <algorithm>
@@ -86,21 +87,39 @@ Rect rect(RECT r) {
   return {double(r.left), double(r.top), double(r.right - r.left),
           double(r.bottom - r.top), r.right <= r.left || r.bottom <= r.top};
 }
-bool codex(DWORD pid) {
+enum class Host { other, codex, learn_harness };
+
+Host editor_host(DWORD pid) {
   Handle p(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
   if (!p.h)
-    return false;
+    return Host::other;
   std::wstring s(32768, L'\0');
   DWORD n = DWORD(s.size());
   if (!QueryFullProcessImageNameW(p.h, 0, s.data(), &n))
-    return false;
+    return Host::other;
   s.resize(n);
   std::transform(s.begin(), s.end(), s.begin(),
                  [](wchar_t c) { return wchar_t(towlower(c)); });
   auto k = s.find_last_of(L"\\/");
-  return s.substr(k + 1) == L"chatgpt.exe" &&
-         (s.find(L"\\windowsapps\\openai.codex_") != s.npos ||
-          s.find(L"\\openai\\codex\\") != s.npos);
+  const auto name = std::wstring_view(s).substr(k + 1);
+  if (name == L"chatgpt.exe" &&
+      (s.find(L"\\windowsapps\\openai.codex_") != s.npos ||
+       s.find(L"\\openai\\codex\\") != s.npos))
+    return Host::codex;
+  if (name != L"learnharness.exe")
+    return Host::other;
+  static const auto installed_path = [] {
+    PWSTR raw{};
+    const auto result = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &raw);
+    std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> folder(raw, CoTaskMemFree);
+    if (FAILED(result) || !folder)
+      return std::wstring{};
+    auto path = std::wstring(folder.get()) + L"\\Programs\\learnharness\\LearnHarness.exe";
+    std::transform(path.begin(), path.end(), path.begin(),
+                   [](wchar_t c) { return wchar_t(towlower(c)); });
+    return path;
+  }();
+  return s == installed_path ? Host::learn_harness : Host::other;
 }
 json jr(Rect r) { return {r.x, r.y, r.width, r.height, r.empty}; }
 Rect rj(const json &j) { return {j.at(0), j.at(1), j.at(2), j.at(3), j.at(4)}; }
@@ -111,6 +130,7 @@ json wire(const Snapshot &s) {
             {"bounds", jr(s.bounds)},
             {"pid", s.process_id},
             {"hwnd", s.host_window},
+            {"host", s.host},
             {"focus", s.keyboard_focused},
             {"category", s.field_category},
             {"method", s.read_method},
@@ -142,6 +162,7 @@ Snapshot unwire(const json &j) {
   s.bounds = rj(j.at("bounds"));
   s.process_id = j.at("pid");
   s.host_window = j.at("hwnd");
+  s.host = j.at("host");
   s.keyboard_focused = j.at("focus");
   s.field_category = j.at("category");
   s.read_method = j.at("method");
@@ -402,15 +423,35 @@ class Accessor {
             t == UIA_DocumentControlTypeId) &&
            has_class(property(e, UIA_ClassNamePropertyId), L"ProseMirror");
   }
+  bool learn_harness_editor(IUIAutomationElement *e) {
+    if (type(e) != UIA_EditControlTypeId ||
+        !has_class(property(e, UIA_ClassNamePropertyId), L"lh-input"))
+      return false;
+    const auto name = property(e, UIA_NamePropertyId);
+    for (std::wstring_view label : {
+             L"What do you want to practice?", L"What do you want to learn?",
+             L"Ask, answer, or steer the lesson…",
+             L"Ask anything, or press Enter for the next one.",
+             L"Type your answer…", L"Type your own answer…",
+             L"Why this answer? Whatever comes to mind.",
+             L"Work here, think out loud.", L"Whatever comes to mind as you read."})
+      if (name == label)
+        return true;
+    return false;
+  }
+  bool side_question_editor(IUIAutomationElement *e) {
+    return type(e) == UIA_EditControlTypeId &&
+           property(e, UIA_NamePropertyId) == L"Side question";
+  }
   bool structured(IUIAutomationElement *e) {
     int t = type(e);
     auto c = property(e, UIA_ClassNamePropertyId);
-    return shape(e) ||
+    return shape(e) || learn_harness_editor(e) ||
            (t == UIA_ComboBoxControlTypeId && has_class(c, L"cursor-text") &&
             has_class(c, L"overflow-y-auto")) ||
            (t == UIA_EditControlTypeId && has_class(c, L"overflow-y-auto") &&
             (has_class(c, L"cursor-text") ||
-             has_class(c, L"ui-prompt-input-editor__input")));
+              has_class(c, L"ui-prompt-input-editor__input")));
   }
   bool editable(IUIAutomationElement *e) {
     BOOL enabled{}, focusable{};
@@ -567,17 +608,19 @@ class Accessor {
     return false;
   }
   bool eligible(IUIAutomationElement *e) {
-    int pid{}, type{};
+    int pid{}, control_type{};
     BOOL enabled{}, off{}, pass{};
     check(e->get_CurrentProcessId(&pid));
-    if (!codex(pid))
+    const auto host = editor_host(pid);
+    if (host == Host::other)
       return false;
-    check(e->get_CurrentControlType(&type));
+    check(e->get_CurrentControlType(&control_type));
     check(e->get_CurrentIsEnabled(&enabled));
     check(e->get_CurrentIsOffscreen(&off));
     check(e->get_CurrentIsPassword(&pass));
     if (!enabled || off || pass)
       return false;
+    const bool side_question = host == Host::learn_harness && side_question_editor(e);
     ComPtr<IUIAutomationValuePattern> v;
     if (SUCCEEDED(
             e->GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(&v))) &&
@@ -586,7 +629,12 @@ class Accessor {
       check(v->get_CurrentIsReadOnly(&ro));
       if (ro)
         return false;
+      // Chromium dispatches input and change events for a textarea ValuePattern write.
+      if (side_question)
+        return true;
     }
+    if (side_question)
+      return false;
     ComPtr<IUIAutomationTextPattern> t;
     if (SUCCEEDED(
             e->GetCurrentPatternAs(UIA_TextPatternId, IID_PPV_ARGS(&t))) &&
@@ -600,10 +648,30 @@ class Accessor {
       VariantClear(&ro);
       if (readonly)
         return false;
+      if (host == Host::learn_harness) {
+        if (!learn_harness_editor(e))
+          return false;
+        // LearnHarness keeps the original file paths and citations outside the
+        // visible chip text. Only edit a draft whose text range is plain text.
+        ComPtr<IUIAutomationElementArray> children;
+        check(r->GetChildren(&children));
+        int count{};
+        if (children)
+          check(children->get_Length(&count));
+        for (int i = 0; i < count; ++i) {
+          ComPtr<IUIAutomationElement> child;
+          check(children->GetElement(i, &child));
+          if (type(child.Get()) != UIA_TextControlTypeId)
+            return false;
+        }
+        return true;
+      }
     }
+    if (host == Host::learn_harness)
+      return false;
     if (shape(e))
       return true;
-    if (type != UIA_EditControlTypeId)
+    if (control_type != UIA_EditControlTypeId)
       return false;
     if (natural(e))
       return true;
@@ -685,7 +753,7 @@ class Accessor {
     for (int n = 0; f && n < 12; ++n) {
       int pid{};
       check(f->get_CurrentProcessId(&pid));
-      if (!codex(pid))
+      if (editor_host(pid) == Host::other)
         return false;
       if (rid(f.Get()) == id)
         return true;
@@ -743,11 +811,12 @@ class Accessor {
     HWND foreground = GetForegroundWindow();
     auto host = reinterpret_cast<HWND>(s.host_window);
     if (!host || (foreground != host && !own_overlay(foreground)) ||
-        !codex(s.process_id))
+        editor_host(s.process_id) == Host::other)
       return {};
     DWORD hostPid{};
     GetWindowThreadProcessId(host, &hostPid);
-    if (!codex(hostPid))
+    const auto kind = editor_host(hostPid);
+    if (kind == Host::other || kind != editor_host(s.process_id))
       return {};
     ComPtr<IUIAutomationElement> root;
     check(u->ElementFromHandle(host, &root));
@@ -755,7 +824,7 @@ class Accessor {
     auto consider = [&](IUIAutomationElement *e) {
       int pid{};
       check(e->get_CurrentProcessId(&pid));
-      if (pid != int(s.process_id) || !codex(pid))
+      if (pid != int(s.process_id))
         return;
       if (rid(e) != s.runtime_id || !eligible(e) ||
           (exact && read(e) != s.text))
@@ -781,6 +850,8 @@ class Accessor {
         f = parent(f.Get());
       }
     }
+    if (kind == Host::learn_harness)
+      return {};
     // A noneditable Codex toolbar control or the trusted overlay may have
     // displaced focus. A different editable field was rejected above; resolve
     // only the original HWND and exact identity, never a historical COM object.
@@ -1321,7 +1392,7 @@ class Accessor {
       check(a->GetElement(i, &e));
       int pid{};
       check(e->get_CurrentProcessId(&pid));
-      if (!codex(pid))
+      if (editor_host(pid) == Host::other)
         continue;
       BOOL off{};
       check(e->get_CurrentIsOffscreen(&off));
@@ -1619,7 +1690,8 @@ public:
       HWND hwnd = GetForegroundWindow();
       DWORD pid{};
       GetWindowThreadProcessId(hwnd, &pid);
-      if (!hwnd || !codex(pid)) {
+      const auto host = editor_host(pid);
+      if (!hwnd || host == Host::other) {
         captureReason = hwnd ? CaptureReason::other_host
                              : CaptureReason::foreground_missing;
         events(nullptr);
@@ -1636,7 +1708,7 @@ public:
       for (int n = 0; f && n < 16; ++n) {
         int p{};
         check(f->get_CurrentProcessId(&p));
-        if (!codex(p)) {
+        if (editor_host(p) != host) {
           foreignFocusedHost = n == 0;
           break;
         }
@@ -1652,12 +1724,12 @@ public:
         }
         f = parent(f.Get());
       }
-      if (!e && !require) {
+      if (!e && !require && host == Host::codex) {
         auto searchRoot = root;
         if (originalFocus) {
           int focusedPid{};
           check(originalFocus->get_CurrentProcessId(&focusedPid));
-          if (codex(focusedPid)) {
+          if (editor_host(focusedPid) == host) {
             auto focusedDocument = document(originalFocus.Get());
             if (focusedDocument)
               searchRoot = focusedDocument;
@@ -1689,6 +1761,8 @@ public:
       check(e->get_CurrentProcessId(&ep));
       s.process_id = ep;
       s.host_window = reinterpret_cast<uint64_t>(hwnd);
+      if (host == Host::learn_harness)
+        s.host = "LearnHarness";
       s.runtime_id = rid(e.Get());
       s.text = read(e.Get());
       s.keyboard_focused = focused(e.Get());
@@ -1710,13 +1784,15 @@ public:
             v)
           s.read_method = "value_pattern";
       }
-      if (s.field_category == "chat") {
+      if (s.field_category == "chat" ||
+          (host == Host::learn_harness && s.read_method == "text_pattern")) {
         auto name = property(e.Get(), UIA_NamePropertyId);
         auto trimmed = s.text;
         while (!trimmed.empty() &&
                (trimmed.back() == L'\r' || trimmed.back() == L'\n'))
           trimmed.pop_back();
-        if (!name.empty() && name == trimmed) {
+        if ((!name.empty() && name == trimmed) ||
+            (host == Host::learn_harness && s.text.find(L'\uFFFC') != s.text.npos)) {
           captureReason = CaptureReason::ambiguous_placeholder;
           return {};
         }
@@ -1861,6 +1937,12 @@ public:
                     : make_edit_plan(expected, replacement);
     if (!plan) {
       out.status = "unsafe_edit_plan";
+      return out;
+    }
+    constexpr size_t side_question_max_chars = 8000;
+    if (s.host == "LearnHarness" && s.read_method == "value_pattern" &&
+        replacement.size() > side_question_max_chars) {
+      out.status = "text_limit";
       return out;
     }
     struct Target : EditTarget {
