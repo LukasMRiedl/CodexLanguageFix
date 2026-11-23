@@ -764,11 +764,13 @@ class Accessor {
     return false;
   }
   bool current(IUIAutomationElement *e, const Snapshot &s) {
+    return GetForegroundWindow() == reinterpret_cast<HWND>(s.host_window) &&
+           original_editor(e, s) && eligible(e) && focused(e);
+  }
+  bool original_editor(IUIAutomationElement *e, const Snapshot &s) {
     int pid{};
     check(e->get_CurrentProcessId(&pid));
-    return pid == int(s.process_id) &&
-           GetForegroundWindow() == reinterpret_cast<HWND>(s.host_window) &&
-           eligible(e) && rid(e) == s.runtime_id && focused(e);
+    return pid == int(s.process_id) && rid(e) == s.runtime_id;
   }
   void events(IUIAutomationElement *root) {
     if (root && eventRoot) {
@@ -1958,6 +1960,13 @@ public:
           : a(aa), e(ee), s(std::move(ss)) {}
       bool is_current_editor() override { return a.current(e, s); }
       std::optional<std::wstring> read() override { return a.read(e); }
+      std::optional<std::wstring> read_original_editor() override {
+        if (!a.original_editor(e, s))
+          return {};
+        auto value = a.read(e);
+        return a.original_editor(e, s) ? std::optional{std::move(value)}
+                                       : std::nullopt;
+      }
       bool can_replace(int start, std::wstring_view old) override {
         if (s.read_method == "value_pattern") {
           ComPtr<IUIAutomationValuePattern> v;
@@ -1998,28 +2007,37 @@ public:
         plan->edits.push_back({0, expected, replacement});
     }
     out = apply_edit_plan(*plan, target);
-    if (out.state == WriteState::applied) {
-      if (expected != replacement) {
-        lastPlan = *plan;
-        lastEditor = identity_only(s);
-      }
-      try {
-        auto p = pattern(e.Get());
-        ComPtr<IUIAutomationTextRange> caret;
-        if (p)
-          check(p->get_DocumentRange(&caret));
-        if (caret) {
-          check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_Start,
-                                           caret.Get(), TextPatternRangeEndpoint_End));
-          if (target.is_current_editor() && target.read() == replacement)
-            check(caret->Select());
-        }
-      } catch (...) {
-        // A caret operation must not invalidate a verified write or its undo.
-      }
+    if (out.state == WriteState::applied && expected != replacement) {
+      lastPlan = std::move(*plan);
+      lastEditor = identity_only(s);
     }
     invalidate();
     return out;
+  }
+  void place_caret(uint64_t token, const std::wstring &expected) {
+    try {
+      auto i = std::find_if(ids.begin(), ids.end(),
+                            [=](const Snapshot &s) { return s.token == token; });
+      if (i == ids.end())
+        return;
+      auto saved = *i;
+      saved.text = expected;
+      auto e = resolve(saved, true);
+      if (!e || !current(e.Get(), saved))
+        return;
+      auto p = pattern(e.Get());
+      ComPtr<IUIAutomationTextRange> caret;
+      if (p)
+        check(p->get_DocumentRange(&caret));
+      if (!caret)
+        return;
+      check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_Start,
+                                      caret.Get(), TextPatternRangeEndpoint_End));
+      if (current(e.Get(), saved) && read(e.Get()) == expected)
+        check(caret->Select());
+    } catch (...) {
+      // The write result has already been reported to the caller.
+    }
   }
 };
 } // namespace
@@ -2076,12 +2094,18 @@ int run_composer_worker(uint32_t parent_id) {
           if (old.size() > 20000 || replacement.size() > 20000 ||
               !valid_utf16(old) || !valid_utf16(replacement))
             break;
-          auto r = a.replace(j.at("token"), old, replacement);
+          const auto token = j.at("token").get<uint64_t>();
+          auto r = a.replace(token, old, replacement);
           response["write"] = {{"state", int(r.state)},
                                {"status", r.status},
                                {"count", r.applied_changes}};
           if (r.observed)
             response["write"]["observed"] = utf8(*r.observed);
+          response["capture_status"] = a.capture_status();
+          transmit(GetStdHandle(STD_OUTPUT_HANDLE), response);
+          if (r.state == WriteState::applied)
+            a.place_caret(token, replacement);
+          continue;
         } else if (op != "ping")
           break;
         response["capture_status"] = a.capture_status();

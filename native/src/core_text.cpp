@@ -704,6 +704,10 @@ WriteResult apply_edit_plan(const EditPlan& plan, EditTarget& target) {
 
     auto recover = [&](std::string status) -> WriteResult {
         try {
+            if (attempted_write && target.read_original_editor() == std::optional<std::wstring>(plan.corrected)) {
+                return {WriteState::applied, plan.original, plan.corrected,
+                    static_cast<int>(plan.edits.size()), "ok_verified"};
+            }
             if (pending && target.is_current_editor() && target.read() == pending_after) {
                 applied.push_back(*pending);
                 expected = *pending_after;

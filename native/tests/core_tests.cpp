@@ -17,6 +17,7 @@ struct MemoryTarget final : clf::EditTarget {
     explicit MemoryTarget(std::wstring value) : text(std::move(value)) {}
     bool is_current_editor() override { return current; }
     std::optional<std::wstring> read() override { return readable ? std::optional<std::wstring>(text) : std::nullopt; }
+    std::optional<std::wstring> read_original_editor() override { return same_editor ? read() : std::nullopt; }
     bool can_replace(int start, std::wstring_view expected) override {
         return start >= 0 && static_cast<std::size_t>(start) <= text.size()
             && expected.size() <= text.size() - static_cast<std::size_t>(start)
@@ -26,14 +27,17 @@ struct MemoryTarget final : clf::EditTarget {
         ++write_calls;
         if (!current || !can_replace(start, expected)) return false;
         text.replace(static_cast<std::size_t>(start), expected.size(), replacement);
+        if (lose_focus_on_write == write_calls) current = false;
         if (fail_on_write == write_calls) return false;
         return true;
     }
     std::wstring text;
     int write_calls{};
     int fail_on_write{};
+    int lose_focus_on_write{};
     bool current{true};
     bool readable{true};
+    bool same_editor{true};
 };
 
 clf::Rect rect(double x, double y, double width, double height) { return {x, y, width, height}; }
@@ -121,6 +125,21 @@ int main() {
         failing.fail_on_write = 1;
         const auto rollback = apply_edit_plan(*transaction_plan, failing);
         check(rollback.state == WriteState::unchanged && failing.text == transaction_plan->original && rollback.status == "write_not_verified", "failed write rolls back verified own text");
+        MemoryTarget completed(transaction_plan->original);
+        completed.fail_on_write = static_cast<int>(transaction_plan->edits.size());
+        const auto completion = apply_edit_plan(*transaction_plan, completed);
+        check(completion.state == WriteState::applied && completed.text == transaction_plan->corrected
+            && completed.write_calls == completed.fail_on_write, "exact complete correction survives a late write failure");
+        MemoryTarget lost_focus(transaction_plan->original);
+        lost_focus.lose_focus_on_write = static_cast<int>(transaction_plan->edits.size());
+        const auto committed = apply_edit_plan(*transaction_plan, lost_focus);
+        check(committed.state == WriteState::applied && committed.observed == transaction_plan->corrected
+            && lost_focus.write_calls == lost_focus.lose_focus_on_write, "exact original editor readback survives focus loss");
+        MemoryTarget lost_identity(transaction_plan->original);
+        lost_identity.lose_focus_on_write = lost_focus.lose_focus_on_write;
+        lost_identity.same_editor = false;
+        const auto unverified = apply_edit_plan(*transaction_plan, lost_identity);
+        check(unverified.state == WriteState::partially_applied, "unidentified readback cannot confirm an edit");
 
         const Rect editor = rect(100, 100, 600, 80);
         const Rect document = rect(0, 0, 1000, 1000);

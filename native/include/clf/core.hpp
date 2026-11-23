@@ -39,6 +39,8 @@ public:
     virtual ~EditTarget() = default;
     virtual bool is_current_editor() = 0;
     virtual std::optional<std::wstring> read() = 0;
+    // Verify and read the original editor even if it has lost keyboard focus.
+    virtual std::optional<std::wstring> read_original_editor() = 0;
     virtual bool can_replace(int start, std::wstring_view expected) = 0;
     virtual bool replace(int start, std::wstring_view expected, std::wstring_view replacement) = 0;
 };
