@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cwchar>
+#include <system_error>
 
 using json = nlohmann::json;
 
@@ -42,7 +43,14 @@ void save_stats() {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
     }
-    MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    DWORD error{};
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return;
+        error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) break;
+        Sleep(2);
+    }
+    throw std::system_error(static_cast<int>(error), std::system_category(), "publish fake server stats");
 }
 
 void send(const json& value) {

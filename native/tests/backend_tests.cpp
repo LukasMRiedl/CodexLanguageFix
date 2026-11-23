@@ -359,10 +359,10 @@ int wmain(int argc, wchar_t** argv) {
         const auto corrected = client.correct(L"Das ist korekt.");
         require(corrected.text == L"Das ist korrekt.", "full-v1 corrected result");
         require(corrected.change_count == 1, "full-v1 change count");
-        require(wait_for_stats(directory_path,[](const json& stats){return count(stats,"turn/start")==1;}),"first turn observed by independent stats reader");
-        const auto first_stats = read_stats(directory_path);
-        const auto turn_count_after_first = count(first_stats, "turn/start");
-        require(turn_count_after_first == 1, "first turn count");
+        constexpr int turn_count_after_first = 1;
+        require(wait_for_stats(directory_path, [](const json& stats) {
+            return count(stats, "turn/start") == turn_count_after_first;
+        }), "first turn count");
 
         stage("main.cache_hit");
         const auto cache_hit = client.correct(L"Das ist korekt.");
