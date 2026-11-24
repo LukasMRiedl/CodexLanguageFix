@@ -2,84 +2,29 @@
 
 **English** · [Deutsch](README.de.md)
 
-A standalone Windows app for one-click prompt correction in OpenAI Codex Desktop and Antigravity. Choose between the free public LanguageTool API and GPT-5.6 Luna through the official Codex ChatGPT OAuth session. No Codex plugin, browser extension, OpenAI API key, additional API billing, or self-hosted server is required.
+Proofread your drafts directly in Windows desktop apps. The native preview supports **Codex Desktop** and **LearnHarness**. Use the **Aa** button or a keyboard shortcut to fix spelling, grammar and punctuation in the active draft.
 
-> This is an independent project and is not affiliated with OpenAI, Google, or LanguageTool.
+| Version | What you can use | Where to get it |
+| --- | --- | --- |
+| **Native preview 2.1.5** | Codex Desktop and LearnHarness 0.7.0, including lesson answers and side questions. Uses your existing Codex sign-in. | [Preview guide and source build](https://github.com/LukasMRiedl/CodexLanguageFix/tree/codex/native-ram-20261114#codex-language-fix) |
+| **Published release 1.4.0** | Earlier Windows app for Codex Desktop, Antigravity and Hermes. | [Windows x64 ZIP](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v1.4.0/CodexLanguageFix-win-x64.zip) · [Release notes](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v1.4.0) |
 
-## Features
+To run the published release, extract the ZIP to a permanent folder and start `CodexLanguageFix.exe`. See the [v1.4.0 guide](https://github.com/LukasMRiedl/CodexLanguageFix/blob/v1.4.0/README.md) for its settings and requirements.
 
-- A subtle `Aa` button dynamically appears inside the active prompt bar.
-- One click checks spelling, grammar, punctuation, and style.
-- LanguageTool remains the default provider. OpenAI Luna can be selected from the system tray. Production invokes the qualified `baseline / none / full-v1` profile of `gpt-5.6-luna` with Fast mode; experimental profiles never activate automatically.
-- Luna uses the official Codex App Server and its managed ChatGPT OAuth flow. The app never reads or stores OAuth tokens.
-- German and English are detected automatically, with `de-DE` and `en-US` as the preferred variants.
-- The entire interface is available in English and German. It follows the Windows display language by default and can be switched at any time from the system tray menu.
-- Markdown code blocks, inline code, URLs, email addresses, file paths, command-line options, and common code identifiers remain unchanged.
-- The clipboard is never read or modified.
-- Prompt text is transmitted only after an explicit click.
-- Corrections can be undone immediately.
-- Different window widths, DPI scaling levels, and Chat, Work, and Plan layouts are detected dynamically.
-- No background service and no automatic updater.
+## How the preview works
 
-## Installation
+1. Focus a supported draft and click **Aa** or press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>,</kbd> (<kbd>AltGr</kbd>+<kbd>,</kbd> on a German keyboard).
+2. Review the correction in the same field. You decide when to submit the draft.
+3. Choose **Undo** to restore the original draft if the corrected text is still unchanged.
 
-1. Download `CodexLanguageFix-win-x64.zip` from the [latest release](https://github.com/LukasMRiedl/CodexLanguageFix/releases/latest).
-2. Extract the ZIP archive to a permanent folder.
-3. Run `CodexLanguageFix.exe`.
-4. On first launch, acknowledge that prompts are sent to the selected provider only when you click the correction button.
+| Draft | Corrected |
+| --- | --- |
+| Please chekc the index in `values[2]`. | Please check the index in `values[2]`. |
 
-The app does not require administrator privileges. Its system tray menu lets you select the correction provider, connect OpenAI, test the selected provider, pause or exit the app, and change automatic startup.
+In LearnHarness, correction starts on demand. If your draft includes an embedded attachment or quotation, correct the text before adding it. For details on what is sent to Codex and the optional preparation feature in Codex Desktop, see the [preview privacy notes](https://github.com/LukasMRiedl/CodexLanguageFix/blob/codex/native-ram-20261114/PRIVACY.md).
 
-LanguageTool works without additional software. The optional Luna provider requires an installed, current official Codex runtime and a ChatGPT account available to Codex. If Luna or Fast mode is unavailable, the prompt remains unchanged; Codex Language Fix never silently falls back to another model, mode, or provider.
+## Project links
 
-If the active Codex model catalog deliberately omits Luna's no-reasoning mode, Codex Language Fix creates an app-private catalog copy under `%LOCALAPPDATA%\CodexLanguageFix\luna-runtime` and enables it only for its own App Server process. The global Codex catalog is never modified, so this additional mode does not appear in Codex Desktop.
+[All releases](https://github.com/LukasMRiedl/CodexLanguageFix/releases) · [Report a bug](https://github.com/LukasMRiedl/CodexLanguageFix/issues/new) · [Security policy](SECURITY.md)
 
-The published executable is currently not code-signed. Windows may therefore display a security warning the first time you launch it.
-
-## Privacy
-
-Only after you click the correction button does the app send the current prompt to the selected provider. LanguageTool requests go over HTTPS to `https://api.languagetool.org/v2/check`. Luna requests use ChatGPT OAuth through the official Codex App Server; the app has no API-key path. Production uses the qualified `baseline / none / full-v1` profile in an ephemeral `gpt-5.6-luna` thread with Fast mode, a read-only/no-network sandbox, and explicit instructions prohibiting tools. The App Server and one empty single-use thread may be prepared without composer content, but no correction or local draft starts while you type. Segment and span-edit protocols as well as `low` and `medium` reasoning remain disabled. Technical spans are replaced locally with random placeholders before Luna sees the text and restored only after strict validation.
-
-Prompt text, corrected text, provider responses, OAuth tokens, email addresses, and account details are never logged. Up to 64 validated Luna results are cached only in memory and discarded when the app exits. Local diagnostic logs contain only technical metadata such as provider, timestamp, duration, status code, character count, and change count. They are deleted after seven days.
-
-See [PRIVACY.md](PRIVACY.md) for more information.
-
-## Provider limits
-
-LanguageTool is locally limited to 20 requests and 75,000 characters per minute. Both providers accept at most 20,000 characters per correction. The app creates no queue and performs no background corrections. Luna usage is subject to the limits of the ChatGPT account connected to Codex.
-
-## Build and test
-
-The .NET 8 SDK on Windows is required.
-
-```powershell
-dotnet test .\CodexLanguageFix.sln
-dotnet publish .\src\CodexLanguageFix\CodexLanguageFix.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true
-```
-
-The external quality and latency benchmark is intentionally opt-in and requires the Codex ChatGPT OAuth session. Its fixed, deterministic four-stage search evaluates all 15 prompt/reasoning combinations, selects one prompt per reasoning level, compares all six output protocols on long texts, and directly verifies the winner against `baseline / none / full-v1`. Search stages use two concurrent Luna requests; the final bilingual LanguageTool comparison runs without competing Luna load and respects LanguageTool's public rate limit. There is no global time cutoff: every stage completes and writes a durable schema-v3 report without raw text. With the observed roughly seven seconds per Luna correction, the qualified run completed 144 planned measurements in 15 minutes 44 seconds.
-
-```powershell
-.\scripts\run-full-luna-qualification.ps1
-```
-
-The qualification of 20 August 2026 selected `baseline / none / full-v1`. It passed every safety gate and achieved an F0.5 score of 0.75 versus LanguageTool's 0.25 on the final paired sample. Luna was not faster: its warm p50 was 7.97 seconds versus 0.72 seconds for LanguageTool, about 11.1 times slower. Segment and span-edit protocols therefore were not activated. A future profile is described as faster only if both paired p50 and p95 latency gates pass; otherwise maximum safe quality decides the Luna profile.
-
-The resulting self-contained executable is written to:
-
-`src\CodexLanguageFix\bin\Release\net8.0-windows\win-x64\publish\CodexLanguageFix.exe`
-
-## Supported applications
-
-- OpenAI Codex Desktop for Windows
-- Antigravity for Windows
-
-Application detection relies on accessible UI structures rather than hard-coded screen coordinates.
-
-## Legal status
-
-The source code is publicly available, but no open-source license has been granted. Unless an explicit license is added, standard copyright law applies.
+Codex Language Fix is an independent project. The project source is publicly viewable under standard copyright.
