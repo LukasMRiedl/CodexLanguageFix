@@ -6,6 +6,10 @@
 
 Korrigiere Entwürfe direkt in **Codex Desktop** und **LearnHarness**. Über **Aa** oder ein Tastenkürzel korrigierst du Rechtschreibung, Grammatik und Zeichensetzung. Die App nutzt die offizielle Codex-Laufzeit und deine bestehende Codex-Anmeldung.
 
+[Vorschau für Windows x64 herunterladen](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v2.1.5-preview/CodexLanguageFix-2.1.5-preview-win-x64.zip) · [Versionshinweise und SHA-256-Prüfsumme](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v2.1.5-preview)
+
+Entpacke das ZIP in einen festen Ordner, beende eine eventuell laufende Instanz im Infobereich und starte `CodexLanguageFix.exe`. Die EXE ist unsigniert. Voraussetzung ist Codex Desktop mit einem angemeldeten ChatGPT-Konto.
+
 | App | Unterstützte Felder |
 | --- | --- |
 | **Codex Desktop für Windows** | Chat-Eingabe und ausgewählte Freitextfelder |
@@ -21,10 +25,10 @@ Korrigiere LearnHarness-Entwürfe vor dem Einfügen eingebetteter Anhänge oder 
 
 ## Vorschau bauen
 
-Die native Vorschau ist als Quellcode verfügbar. Zum Bauen brauchst du **Visual Studio Build Tools 2022** mit **Desktopentwicklung mit C++**, das Windows SDK und CMake. Für die Korrektur brauchst du Codex Desktop und ein in Codex angemeldetes ChatGPT-Konto.
+Zum Bauen brauchst du **Visual Studio Build Tools 2022** mit **Desktopentwicklung mit C++**, das Windows SDK und CMake.
 
 ```powershell
-git clone --branch codex/native-ram-20261114 https://github.com/LukasMRiedl/CodexLanguageFix.git
+git clone --branch v2.1.5-preview https://github.com/LukasMRiedl/CodexLanguageFix.git
 Set-Location CodexLanguageFix
 .\scripts\build-native.ps1
 ```

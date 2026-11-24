@@ -6,6 +6,10 @@
 
 Proofread drafts directly in **Codex Desktop** and **LearnHarness**. Click **Aa** or use a keyboard shortcut for spelling, grammar and punctuation corrections. The preview uses the official Codex runtime and your existing Codex sign-in.
 
+[Download the preview for Windows x64](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v2.1.5-preview/CodexLanguageFix-2.1.5-preview-win-x64.zip) · [Release notes and SHA-256 checksum](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v2.1.5-preview)
+
+Extract the ZIP to a permanent folder, exit any running instance from the system tray and start `CodexLanguageFix.exe`. The executable is unsigned. You need Codex Desktop with a signed-in ChatGPT account.
+
 | App | Supported fields |
 | --- | --- |
 | **Codex Desktop for Windows** | Chat composer and supported prose fields |
@@ -21,10 +25,10 @@ For LearnHarness, run correction before adding embedded attachments or quotation
 
 ## Build the preview
 
-The native preview is distributed as source. Build it on Windows with **Visual Studio Build Tools 2022**, the **Desktop development with C++** workload, the Windows SDK and CMake. Codex Desktop and a signed-in ChatGPT account in Codex are required to run corrections.
+Build the preview on Windows with **Visual Studio Build Tools 2022**, the **Desktop development with C++** workload, the Windows SDK and CMake.
 
 ```powershell
-git clone --branch codex/native-ram-20261114 https://github.com/LukasMRiedl/CodexLanguageFix.git
+git clone --branch v2.1.5-preview https://github.com/LukasMRiedl/CodexLanguageFix.git
 Set-Location CodexLanguageFix
 .\scripts\build-native.ps1
 ```
