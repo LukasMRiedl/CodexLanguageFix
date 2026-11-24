@@ -6,10 +6,10 @@ Proofread your drafts directly in Windows desktop apps. The native preview suppo
 
 | Version | What you can use | Where to get it |
 | --- | --- | --- |
-| **Native preview 2.1.5** | Codex Desktop and LearnHarness 0.7.0, including lesson answers and side questions. Uses your existing Codex sign-in. | [Preview guide and source build](https://github.com/LukasMRiedl/CodexLanguageFix/tree/codex/native-ram-20261114#codex-language-fix) |
-| **Published release 1.4.0** | Earlier Windows app for Codex Desktop, Antigravity and Hermes. | [Windows x64 ZIP](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v1.4.0/CodexLanguageFix-win-x64.zip) · [Release notes](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v1.4.0) |
+| **Native preview 2.1.5** | Codex Desktop and LearnHarness 0.7.0, including lesson answers and side questions. Uses your existing Codex sign-in. | [Windows x64 ZIP](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v2.1.5-preview/CodexLanguageFix-2.1.5-preview-win-x64.zip) · [Preview release notes](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v2.1.5-preview) |
+| **Stable release 1.4.0** | Earlier Windows app for Codex Desktop, Antigravity and Hermes. | [Windows x64 ZIP](https://github.com/LukasMRiedl/CodexLanguageFix/releases/download/v1.4.0/CodexLanguageFix-win-x64.zip) · [Release notes](https://github.com/LukasMRiedl/CodexLanguageFix/releases/tag/v1.4.0) |
 
-To run the published release, extract the ZIP to a permanent folder and start `CodexLanguageFix.exe`. See the [v1.4.0 guide](https://github.com/LukasMRiedl/CodexLanguageFix/blob/v1.4.0/README.md) for its settings and requirements.
+To run v1.4.0, extract its ZIP to a permanent folder and start `CodexLanguageFix.exe`. See the [v1.4.0 guide](https://github.com/LukasMRiedl/CodexLanguageFix/blob/v1.4.0/README.md) for its settings and requirements.
 
 ## How the preview works
 
