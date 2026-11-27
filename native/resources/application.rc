@@ -1,7 +1,7 @@
 #include <windows.h>
 1 VERSIONINFO
- FILEVERSION 2,1,5,0
- PRODUCTVERSION 2,1,5,0
+ FILEVERSION 2,1,7,0
+ PRODUCTVERSION 2,1,7,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -14,11 +14,11 @@ BEGIN
   BEGIN
    VALUE "CompanyName", "Codex Language Fix\0"
    VALUE "FileDescription", "Codex Language Fix\0"
-   VALUE "FileVersion", "2.1.5\0"
+   VALUE "FileVersion", "2.1.7\0"
    VALUE "InternalName", "CodexLanguageFix\0"
    VALUE "OriginalFilename", "CodexLanguageFix.exe\0"
    VALUE "ProductName", "Codex Language Fix\0"
-   VALUE "ProductVersion", "2.1.5\0"
+   VALUE "ProductVersion", "2.1.7\0"
   END
  END
  BLOCK "VarFileInfo"

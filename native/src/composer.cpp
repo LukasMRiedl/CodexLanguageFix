@@ -1,3 +1,4 @@
+#include "clf/backend.hpp"
 #include "clf/composer.hpp"
 #include "clf/core.hpp"
 #include <Windows.h>
@@ -8,9 +9,12 @@
 #include <UIAutomation.h>
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <map>
 #include <memory>
@@ -95,7 +99,48 @@ Rect rect(RECT r) {
   return {double(r.left), double(r.top), double(r.right - r.left),
           double(r.bottom - r.top), r.right <= r.left || r.bottom <= r.top};
 }
-enum class Host { other, codex, learn_harness };
+enum class Host { other, codex, learn_harness, learn_harness_fork };
+
+bool is_learn_harness(Host host) {
+  return host == Host::learn_harness || host == Host::learn_harness_fork;
+}
+
+struct LearnHarnessFork {
+  std::wstring executable, origin;
+};
+
+const std::optional<LearnHarnessFork> &learn_harness_fork() {
+  static const auto configured = []() -> std::optional<LearnHarnessFork> {
+    try {
+      const auto file = std::filesystem::path(application_directory()) /
+                        L"learnharness-fork.json";
+      std::ifstream input(file, std::ios::binary);
+      if (!input)
+        return {};
+      const auto config = json::parse(input);
+      const auto executable = utf16(config.at("executable").get<std::string>());
+      const std::filesystem::path path(executable);
+      const auto drive = path.root_name().wstring();
+      if (!path.is_absolute() || drive.size() != 2 || drive.back() != L':' ||
+          executable.find(L'\0') != executable.npos)
+        return {};
+      const auto origin = config.at("origin").get<std::string>();
+      if (!origin.starts_with("http://localhost:") &&
+          !origin.starts_with("http://127.0.0.1:"))
+        return {};
+      const auto port = std::string_view(origin).substr(origin.rfind(':') + 1);
+      unsigned value{};
+      const auto parsed = std::from_chars(port.data(), port.data() + port.size(), value);
+      if (parsed.ec != std::errc{} || parsed.ptr != port.data() + port.size() ||
+          value == 0 || value > 65535)
+        return {};
+      return LearnHarnessFork{executable, utf16(origin)};
+    } catch (...) {
+      return {};
+    }
+  }();
+  return configured;
+}
 
 Host editor_host(DWORD pid) {
   Handle p(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
@@ -114,6 +159,12 @@ Host editor_host(DWORD pid) {
       (s.find(L"\\windowsapps\\openai.codex_") != s.npos ||
        s.find(L"\\openai\\codex\\") != s.npos))
     return Host::codex;
+  if (name == L"electron.exe") {
+    const auto &fork = learn_harness_fork();
+    if (fork && CompareStringOrdinal(s.c_str(), -1, fork->executable.c_str(),
+                                     -1, TRUE) == CSTR_EQUAL)
+      return Host::learn_harness_fork;
+  }
   if (name != L"learnharness.exe")
     return Host::other;
   static const auto installed_path = [] {
@@ -451,6 +502,14 @@ class Accessor {
     return type(e) == UIA_EditControlTypeId &&
            property(e, UIA_NamePropertyId) == L"Side question";
   }
+  bool fork_document(IUIAutomationElement *e) {
+    const auto doc = document(e);
+    if (!doc || property(doc.Get(), UIA_NamePropertyId) != L"Learning Harness")
+      return false;
+    const auto url = property(doc.Get(), UIA_ValueValuePropertyId);
+    const auto &origin = learn_harness_fork()->origin;
+    return url == origin || (url.starts_with(origin) && url[origin.size()] == L'/');
+  }
   bool structured(IUIAutomationElement *e) {
     int t = type(e);
     auto c = property(e, UIA_ClassNamePropertyId);
@@ -628,7 +687,8 @@ class Accessor {
     check(e->get_CurrentIsPassword(&pass));
     if (!enabled || off || pass)
       return false;
-    const bool side_question = host == Host::learn_harness && side_question_editor(e);
+    const bool learn_harness = is_learn_harness(host);
+    const bool side_question = learn_harness && side_question_editor(e);
     ComPtr<IUIAutomationValuePattern> v;
     if (SUCCEEDED(
             e->GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(&v))) &&
@@ -656,7 +716,7 @@ class Accessor {
       VariantClear(&ro);
       if (readonly)
         return false;
-      if (host == Host::learn_harness) {
+      if (learn_harness) {
         if (!learn_harness_editor(e))
           return false;
         // LearnHarness keeps the original file paths and citations outside the
@@ -675,7 +735,7 @@ class Accessor {
         return true;
       }
     }
-    if (host == Host::learn_harness)
+    if (learn_harness)
       return false;
     if (shape(e))
       return true;
@@ -837,6 +897,7 @@ class Accessor {
       if (pid != int(s.process_id))
         return;
       if (rid(e) != s.runtime_id || !eligible(e) ||
+          (kind == Host::learn_harness_fork && !fork_document(e)) ||
           (exact && read(e) != s.text))
         return;
       if (match)
@@ -860,7 +921,7 @@ class Accessor {
         f = parent(f.Get());
       }
     }
-    if (kind == Host::learn_harness)
+    if (is_learn_harness(kind))
       return {};
     // A noneditable Codex toolbar control or the trusted overlay may have
     // displaced focus. A different editable field was rejected above; resolve
@@ -1094,7 +1155,8 @@ class Accessor {
                     c == 0x2028 || c == 0x2029;
            });
   }
-  static bool selectkeys(const std::wstring &s, bool extend = true) {
+  static bool selectkeys(const std::wstring &s, bool extend = true,
+                         WORD direction = VK_RIGHT) {
     if (!simple(s) || s.empty() || !modifiers())
       return false;
     std::vector<INPUT> v;
@@ -1102,8 +1164,8 @@ class Accessor {
       v.push_back(key(VK_SHIFT));
     for (auto offset : grapheme_boundaries(s)) {
       (void)offset;
-      v.push_back(key(VK_RIGHT, KEYEVENTF_EXTENDEDKEY));
-      v.push_back(key(VK_RIGHT, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+      v.push_back(key(direction, KEYEVENTF_EXTENDEDKEY));
+      v.push_back(key(direction, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
     }
     if (extend)
       v.push_back(key(VK_SHIFT, KEYEVENTF_KEYUP));
@@ -1115,11 +1177,11 @@ class Accessor {
       if (extend) {
         if (sent > 1 && sent % 2 == 0)
           release.push_back(
-              key(VK_RIGHT, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+              key(direction, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
         release.push_back(key(VK_SHIFT, KEYEVENTF_KEYUP));
       } else if (sent % 2)
         release.push_back(
-            key(VK_RIGHT, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+            key(direction, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
       if (!release.empty())
         SendInput(UINT(release.size()), release.data(), sizeof(INPUT));
     }
@@ -1149,15 +1211,38 @@ class Accessor {
     }
     return false;
   }
-  bool select_exact(IUIAutomationElement *e, const Snapshot &s,
-                    IUIAutomationTextRange *target, const std::wstring &before,
-                    int start, const std::wstring &expected) {
-    if (!current(e, s) || read(e) != before)
+  bool select_learn_harness_exact(IUIAutomationElement *e, const Snapshot &s,
+                                  IUIAutomationTextRange *target,
+                                  const std::wstring &before, int start,
+                                  const std::wstring &expected) {
+    auto select = [&](IUIAutomationTextRange *range, int offset,
+                      const std::wstring &selected) {
+      if (!current(e, s))
+        return SelectionCheck::editor_changed;
+      if (read(e) != before)
+        return SelectionCheck::source_changed;
+      check(range->Select());
+      return wait_for_selection_exact([&] {
+        return selection(e, s, before, offset, selected);
+      });
+    };
+    const auto result = select(target, start, expected);
+    if (result == SelectionCheck::exact)
+      return true;
+    if (expected.empty() || (result != SelectionCheck::count_mismatch &&
+                             result != SelectionCheck::text_mismatch))
       return false;
-    check(target->Select());
+
+    // Chromium can ignore Select across a wrapped passage in PathInput.
+    // Select backward from a verified caret, then prove both endpoints again.
+    const auto end = start + int(expected.size());
+    const auto caret = range(e, end, L"");
+    if (!caret || select(caret.Get(), end, L"") != SelectionCheck::exact ||
+        !selectkeys(expected, true, VK_LEFT))
+      return false;
     return wait_for_selection_exact([&] {
-             return selection(e, s, before, start, expected);
-           }) == SelectionCheck::exact;
+      return selection(e, s, before, start, expected);
+    }) == SelectionCheck::exact;
   }
   bool stage_replacement(IUIAutomationElement *e, const Snapshot &s, int start,
                          const std::wstring &old, const std::wstring &replacement,
@@ -1168,7 +1253,7 @@ class Accessor {
     check(caret->MoveEndpointByRange(TextPatternRangeEndpoint_Start, caret.Get(),
                                     TextPatternRangeEndpoint_End));
     const auto end = start + int(old.size());
-    if (!select_exact(e, s, caret.Get(), before, end, L""))
+    if (!select_learn_harness_exact(e, s, caret.Get(), before, end, L""))
       return false;
 
     auto discard_staged = [&] {
@@ -1185,7 +1270,7 @@ class Accessor {
                          std::wstring::npos) != 0)
         return false;
       auto inserted_range = range(e, end, inserted);
-      if (inserted_range && select_exact(e, s, inserted_range.Get(), actual, end,
+      if (inserted_range && select_learn_harness_exact(e, s, inserted_range.Get(), actual, end,
                                          inserted) && input(L""))
         wait_for_exact(before, [&]() -> std::optional<std::wstring> { return read(e); },
                        [&] { return current(e, s); });
@@ -1204,7 +1289,11 @@ class Accessor {
         ++last;
       const int offset = boundaries[first];
       const auto part = replacement.substr(offset, boundaries[last] - offset);
-      if (selection(e, s, staged, end + offset, L"") != SelectionCheck::exact ||
+      // PathInput recreates its text nodes after native input. The text can
+      // become readable before Chromium reports the caret in the new nodes.
+      if (wait_for_selection_exact([&] {
+            return selection(e, s, staged, end + offset, L"");
+          }) != SelectionCheck::exact ||
           !input(part))
         return discard_staged();
       staged.insert(end + offset, part);
@@ -1216,7 +1305,7 @@ class Accessor {
     }
 
     auto original = range(e, start, old);
-    if (!original || !select_exact(e, s, original.Get(), staged, start, old) ||
+    if (!original || !select_learn_harness_exact(e, s, original.Get(), staged, start, old) ||
         !input(L""))
       return discard_staged();
     staged.erase(start, old.size());
@@ -1800,7 +1889,8 @@ public:
         }
         bool isEditable = editable(f.Get());
         if (isEditable) {
-          if (eligible(f.Get()))
+          if (eligible(f.Get()) &&
+              (host != Host::learn_harness_fork || fork_document(f.Get())))
             e = f;
           else {
             captureReason = CaptureReason::focused_non_composer;
@@ -1847,7 +1937,7 @@ public:
       check(e->get_CurrentProcessId(&ep));
       s.process_id = ep;
       s.host_window = reinterpret_cast<uint64_t>(hwnd);
-      if (host == Host::learn_harness)
+      if (is_learn_harness(host))
         s.host = "LearnHarness";
       s.runtime_id = rid(e.Get());
       s.text = read(e.Get());
@@ -1873,14 +1963,14 @@ public:
           s.read_method = "value_pattern";
       }
       if (s.field_category == "chat" ||
-          (host == Host::learn_harness && s.read_method == "text_pattern")) {
+          (is_learn_harness(host) && s.read_method == "text_pattern")) {
         auto name = property(e.Get(), UIA_NamePropertyId);
         auto trimmed = s.text;
         while (!trimmed.empty() &&
                (trimmed.back() == L'\r' || trimmed.back() == L'\n'))
           trimmed.pop_back();
         if ((!name.empty() && name == trimmed) ||
-            (host == Host::learn_harness && s.text.find(L'\uFFFC') != s.text.npos)) {
+            (is_learn_harness(host) && s.text.find(L'\uFFFC') != s.text.npos)) {
           captureReason = CaptureReason::ambiguous_placeholder;
           return {};
         }

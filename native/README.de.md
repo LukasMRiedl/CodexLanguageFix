@@ -14,6 +14,27 @@ In LearnHarness werden Korrekturen ausschließlich manuell ausgelöst. Enthält
 das Eingabefeld einen eingebetteten Datei- oder Ordneranhang oder ein Zitat,
 korrigiere den Text vor dem Einfügen dieses Elements.
 
+## Lokalen LearnHarness-Fork freigeben
+
+Ab 2.1.6 lässt sich ein lokaler LearnHarness-Fork im Electron-Entwicklungsmodus
+freigeben. Lege dazu `%LOCALAPPDATA%\CodexLanguageFix\learnharness-fork.json`
+mit dem absoluten Pfad zur `electron.exe` dieses Forks und dessen lokaler Adresse
+an. Eine Konfiguration sieht etwa so aus.
+
+```json
+{
+  "executable": "C:\\Tools\\LearnHarness-Fork\\desktop\\electron.exe",
+  "origin": "http://localhost:3001"
+}
+```
+
+Erlaubt sind `http://localhost` oder `http://127.0.0.1` mit dem exakten Port.
+Starte danach Codex Language Fix neu. Der Worker prüft den Prozesspfad und die
+Adresse des LearnHarness-Dokuments vor dem Erfassen oder Bearbeiten eines Felds.
+Für den Fork gilt dieselbe manuelle Korrektur wie für die Standardinstallation.
+
+## Vergleichsreferenz
+
 Die C#-Quellen unter `src/` und deren Tests bleiben als Vergleichsreferenz erhalten.
 Sie gehören nicht zum nativen Produktpaket. Auch die Programme unter `tests/`
 werden nicht installiert.
